@@ -20,11 +20,15 @@ TO DO:
     add resampling option
     add error logging
     make yaxis labels constant width
+    redo startpage logic/flow
+    add plot settings bar
+    
+    bug: when the parent efs folder doesn't exist, the plot is not sized correctly
     
 
 """
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, Grid
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
@@ -59,6 +63,7 @@ from pathlib import Path
 # import warnings
 import copy
 from tkinter import filedialog
+import inspect
 
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg #, NavigationToolbar2Tk
@@ -68,6 +73,15 @@ from scipy import signal
 # from matplotlib.backend_bases import key_press_handler
 
 LARGE_FONT= ("Verdana", 12)
+DEF_GEOMETRY = [530, 1120]
+DEF_CANVAS_GEOMETRY = [455, 845]
+geostr = '1120x530'
+DEBUG = True
+
+def debug_print(parent_name):
+    if DEBUG:
+        print('DEBUG: ', parent_name, inspect.currentframe().f_back.f_code.co_name)
+        
 
 def slash(pth):
     if len(str(pth))>0:
@@ -189,22 +203,27 @@ class TraceViewer(tk.Tk):
     def __init__(self, *args, **kwargs):
         global filepath
         global n_current_file
+
+        debug_print('TraceViewer')
+        
         
         tk.Tk.__init__(self, *args, **kwargs)
 
-        tk.Tk.wm_title(self, "TraceViewer client")
+        tk.Tk.wm_title(self, "seisplot client")
         
         container = tk.Frame(self)
         container.pack(side="top", fill="both", expand = True)
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
+        
 
         self.frames = {}
 
         for F in (StartPage, TracePlotFrame):
 
             frame = F(container, self)
-
+            
+            # print('frame '+str(F))
             self.frames[F] = frame
 
             frame.grid(row=0, column=0, sticky="nsew")
@@ -212,38 +231,46 @@ class TraceViewer(tk.Tk):
         self.show_frame(StartPage)
 
     def show_frame(self, cont):
+        debug_print('TraceViewer')
+
         show = True
         if cont==TracePlotFrame:
             if n_current_file >= 0:
-                # print('will show frame')
                 show = True
             else:
                 show = False
-                print("Please select a folder with .efs files.")
         if show:
             frame = self.frames[cont]
             if cont==TracePlotFrame: frame.refresh_st()
             frame.tkraise()
     def quit_program(self):
+        debug_print('TraceViewer')
         self.destroy()
         self.quit()
 
 class StartPage(tk.Frame):
 
     def __init__(self, parent, controller):
+        debug_print('StartPage')
+        
+        
         # print('parent n current: ')
         global n_current_file
+        n_current_file = -1
         self.controller = controller
+        self.parent = parent
+        self.efs_files = []
         
+        # print('DEBUG: ',dir(controller))
         
         ### set default preferences
-        # self.efs_parent_dir = '/Users/ivandevert/seis/sample_data/efs_out/ridgecrest2019_sample/efs/2019/07/'
+        self.efs_parent_dir = '/Users/ivandevert/seis/sample_data/efs_out/ridgecrest2019_sample/efs/2019/07/'
         # self.efs_parent_dir = '/Volumes/ianhdd/projects/ridgecrest2019/efs/2019/07/'
-        self.efs_parent_dir = '/Volumes/LaCie/EFS_out/ridgecrest2019/efs/2019/07/'
+        # self.efs_parent_dir = '/Volumes/LaCie/EFS_out/ridgecrest2019/efs/2019/07/'
         
-        if not os.path.isdir(self.efs_parent_dir): 
-            print("not a dir")
-            self.efs_parent_dir = "/"
+        # if not os.path.isdir(self.efs_parent_dir): 
+        #     print("not a dir")
+        #     self.efs_parent_dir = "/"
         
         tk.Frame.__init__(self,parent)
         
@@ -252,12 +279,13 @@ class StartPage(tk.Frame):
         dir_select_label = tk.Label(main_frame, text="Directory selection", font=LARGE_FONT)
         
 
-        plot_button = ttk.Button(main_frame, text="Plot traces",command=lambda: self.controller.show_frame(TracePlotFrame) )
+        self.plot_button = ttk.Button(main_frame, text="Plot traces",command=lambda: self.controller.show_frame(TracePlotFrame) )
         
         quit_button = ttk.Button(main_frame, text='Quit', command=lambda: self.controller.quit_program())
         
         label_efs_parent_dir = tk.Label(main_frame, text="EFS parent directory: ", font=LARGE_FONT)
         self.disp_efs_parent_dir = tk.Label(main_frame,text=self.efs_parent_dir)
+        self.file_count_label = tk.Label(main_frame, text='null')
         button_change_efs_parent_dir = ttk.Button(main_frame,text='Change path',command=lambda: self.change_efs_parent_dir())
         
         
@@ -265,23 +293,55 @@ class StartPage(tk.Frame):
         tk.Label(main_frame,text='').grid(row=2)
         label_efs_parent_dir.grid(row=3,columnspan=2)
         self.disp_efs_parent_dir.grid(row=4,columnspan=2)
-        plot_button.grid(row=5,column=0,sticky='e')
-        button_change_efs_parent_dir.grid(row=5,column=1,sticky='w')
-        tk.Label(main_frame,text='').grid(row=6)
-        quit_button.grid(row=7,columnspan=2)
-                
-        self.update_files()
+        self.file_count_label.grid(row=5, columnspan=2)
+        self.plot_button.grid(row=6,column=0,sticky='e')
+        button_change_efs_parent_dir.grid(row=6,column=1,sticky='w')
+        tk.Label(main_frame,text='').grid(row=7)
+        quit_button.grid(row=8,columnspan=2)
         
+        self.check_dir()
+    
+    def check_dir(self):
+        debug_print('StartPage')
+        # checks if efs_parent_dir exists and has files in it, and handles cases accordingly.
+        # only call update_files() if seismogram files are found.
+        
+        if not os.path.isdir(self.efs_parent_dir): 
+            # print("not a dir")
+            self.file_count_label['text'] = 'Directory does not exist. Please choose a new directory.'
+            self.file_count_label['fg'] = 'black'
+            self.plot_button['state'] = 'disabled'
+        
+        elif os.path.isdir(self.efs_parent_dir):
+            
+            nfiles = len(get_files(self.efs_parent_dir, '.efs'))
+            if nfiles > 0:
+                self.file_count_label['text'] = str(nfiles) + ' files found.'
+                self.file_count_label['fg'] = 'green'
+                self.plot_button['state'] = 'enabled'
+                self.update_files()
+            
+            else:
+                self.file_count_label['text'] = 'No files found in selected directory.'
+                self.file_count_label['fg'] = 'red'
+                self.plot_button['state'] = 'disabled'
+        else:
+            raise ValueError
+            # self.efs_parent_dir = "/"
+
+    
     def change_efs_parent_dir(self):
-        
+        debug_print('StartPage')
         folder_path = filedialog.askdirectory(initialdir=self.efs_parent_dir,title='Select the folder containing EFS files')
         
         if slash(folder_path) != '/':
             self.efs_parent_dir = slash(folder_path)
-            self.update_files()
+            self.check_dir()
             self.controller.frames[TracePlotFrame].populate_file_listbox()
         
     def update_files(self):
+        debug_print('StartPage')
+        # self.controller.geometry(geostr)
         # print('update_files()')
         global filepath
         global n_current_file
@@ -300,15 +360,16 @@ class StartPage(tk.Frame):
         else:
             n_current_file = -1
             filepath = 'null'
-        # print('n_current,filepath: ',n_current_file,filepath)
         
 
 class TracePlotFrame(tk.Frame):
     
     def __init__(self,parent,controller):
+        debug_print('TracePlotFrame')
         global n_current_file
         # print(dir(parent))
         self.controller = controller
+        self.parent = parent
         
         self.efs_files = self.controller.frames[StartPage].efs_files
         self.efs_parent_dir = self.controller.frames[StartPage].efs_parent_dir
@@ -356,14 +417,13 @@ class TracePlotFrame(tk.Frame):
 #%% GUI Layout
 
         main_frame = tk.Frame(self)
-        main_frame.grid(row=0,column=0)
-        # self.grid_columnconfigure(0,weight=5)
-        # self.grid_rowconfigure(0,weight=5)
+        main_frame.grid(row=0,column=0, sticky='nsew')
         
         #%% parent frames
         navbar_frame = tk.Frame(main_frame,padx=5,pady=5,borderwidth=5,relief='groove')
         file_nav_frame = tk.Frame(main_frame,padx=5,pady=5)
-        canvas_frame = tk.Frame(main_frame,padx=5,pady=5,borderwidth=2,relief='groove')
+        # self.canvas_frame = tk.Frame(main_frame,padx=5,pady=5,borderwidth=2,relief='groove')
+        self.canvas_frame = tk.Canvas(main_frame,borderwidth=2,relief='groove')
         trace_nav_frame = tk.Frame(main_frame,padx=5,pady=5)
         canvas_nav_frame = tk.Frame(main_frame,padx=5,pady=5)
         pref_frame = tk.Frame(main_frame,padx=5,pady=5,borderwidth=1,relief='groove')
@@ -371,18 +431,10 @@ class TracePlotFrame(tk.Frame):
         # grid parent frames
         navbar_frame.grid(column=0,row=0,columnspan=3,sticky='ew')
         file_nav_frame.grid(column=0,row=1,rowspan=3,sticky='nw')
-        canvas_frame.grid(column=1,row=1,sticky='nsew')
+        self.canvas_frame.grid(column=1,row=1,sticky='nsew')
         trace_nav_frame.grid(column=2,row=1,rowspan=3,sticky='ne')
         canvas_nav_frame.grid(column=1,row=2,sticky='s')
         pref_frame.grid(column=1,row=3,sticky='s')
-        
-        # for r in [0,1,2,3]:
-        #     main_frame.grid_rowconfigure(r,weight=1)
-        # for c in [0,1,2]:
-        #     main_frame.grid_columnconfigure(c,weight=1)
-        
-        # main_frame.grid_columnconfigure(1,weight=5)
-        # main_frame.grid_rowconfigure(1,weight=5)
         
         #%% navigation frame
         frame_label = tk.Label(navbar_frame, text="Trace plot",font=LARGE_FONT)
@@ -429,11 +481,20 @@ class TracePlotFrame(tk.Frame):
         ### end file nav frame
         
         #%% canvas frame
-        self.fig = Figure(figsize=(10,5), dpi=100)
+        # self.fig = Figure(figsize=(10,5), dpi=100)
+        self.fig = Figure(dpi=100,tight_layout=True, figsize=np.flip(DEF_CANVAS_GEOMETRY)/100)
         self.ax = self.fig.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=canvas_frame)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.canvas_frame)
+        
+        
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.pack(fill='both',expand=True)
+        self.canvas_frame.itemconfigure(self.canvas, width=DEF_CANVAS_GEOMETRY[1], height=DEF_CANVAS_GEOMETRY[0])
+        self.canvas_frame.config(width=DEF_CANVAS_GEOMETRY[1], height=DEF_CANVAS_GEOMETRY[0])
+        # self.canvas.draw()
+        # self.canvas_frame.draw()
+        
+        # self.canvas_widget.
         # self.canvas._tkcanvas.pack()
         ### end canvas frame
         
@@ -515,7 +576,7 @@ class TracePlotFrame(tk.Frame):
         # end trace filtering
         
         
-        # # sorting MAYBE COMING SOON
+        # # sorting MAYBE COMING SOON idk
         # self.trace_order_text = 'NULL'
         # self.trace_sort_ascend = True
         # selected = tk.StringVar()
@@ -550,13 +611,13 @@ class TracePlotFrame(tk.Frame):
         self.filter_type_box = ttk.Combobox(pref_frame,textvariable=current_pref_filter_type,values=filter_type_values,state='readonly',width=box_width)
         self.filter_type_box.set(self.pref_filter_type)
         
-        self.f1_label = tk.Label(pref_frame,text='null',width=col_lb1_width,anchor='e')
-        self.f2_label = tk.Label(pref_frame,text='null',width=col_lb1_width,anchor='e')
-        self.f3_label = tk.Label(pref_frame,text='null',width=col_lb1_width,anchor='e')
+        self.f1_label = tk.Label(pref_frame,text='null',anchor='e')
+        self.f2_label = tk.Label(pref_frame,text='null',anchor='e') # ,width=col_lb1_width
+        self.f3_label = tk.Label(pref_frame,text='null',anchor='e')
         
-        self.f1_entry = ttk.Spinbox(pref_frame,width=5,from_=0.01,to=100.0)
-        self.f2_entry = ttk.Spinbox(pref_frame,width=5,from_=0.0,to=100.0)
-        self.f3_entry = ttk.Spinbox(pref_frame,width=5,from_=0.0,to=100.0)
+        self.f1_entry = ttk.Spinbox(pref_frame,width=3,from_=0.01,to=100.0)
+        self.f2_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
+        self.f3_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
         self.show_response_button = ttk.Button(pref_frame,text='Response',command=lambda:popup_response(self))
         
         self.f1_entry.insert(0,str(self.pref_filter_freq))
@@ -573,6 +634,8 @@ class TracePlotFrame(tk.Frame):
         self.f3_label.grid(column=6,row=1,sticky='w')
         self.f3_entry.grid(column=7,row=1,sticky='w')
         self.show_response_button.grid(column=8,row=1,sticky='e')
+        
+        pref_frame.rowconfigure(1, weight=1)
         # end filter row
         
         ### plot picks row row=2
@@ -584,9 +647,21 @@ class TracePlotFrame(tk.Frame):
         self.plot_picks_box.grid(column=1,row=2,sticky='w')
         self.plot_picks_box.set(self.pref_plot_picks)
         
-        self.populate_file_listbox()
+        #%% make resizeable 
+        # Grid.rowconfigure(self, 0, weight=1)
+        # Grid.columnconfigure(self, 0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(1, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        # self.canvas.draw()
+        
+        if n_current_file >= 0:
+            self.populate_file_listbox()
         # end plot picks row
         #%% end pref frame
+        
+        
         
 #%%
         
@@ -594,21 +669,25 @@ class TracePlotFrame(tk.Frame):
         self.t0 = 0
         self.tf = -99999
         
+        # print(n_current_file)
         if n_current_file >= 0:
             self.on_file_change()
     
     def plot_spectrogram(self):
+        debug_print('TracePlotFrame')
         tr = self.tr_pref.copy()
         tr.spectrogram()
         return
     
     def plot_ppsd(self):
+        debug_print('TracePlotFrame')
         tr = self.tr_pref
         d = tr.data
         Pxx, freqs = plt.psd(d,Fs=tr.stats.sampling_rate)
         return
     
     def filter_traces(self):
+        debug_print('TracePlotFrame')
         id_str = self.trace_filter_id_entry.get()
         dist1 = float(self.trace_filter_dist1_entry.get())
         dist2 = float(self.trace_filter_dist2_entry.get())
@@ -636,6 +715,7 @@ class TracePlotFrame(tk.Frame):
         return
         
     def filter_help_popup(self):
+        debug_print('TracePlotFrame')
         lines = ['Enter Unix-style, comma-separated strings to filter out certain traces. ',
                  '* is a wildcard for one or more characters',
                  '? is a wildcard for exactly one character',
@@ -666,6 +746,7 @@ class TracePlotFrame(tk.Frame):
     #     self.trace_sort_order_button['text'] = 'Sorting by ('+self.trace_order_text+'): '
     
     def populate_trace_listbox(self):
+        debug_print('TracePlotFrame')
         trace_ids = [str(el).split('|')[0].strip() for el in self.st_subset.traces]
         self.ntr = len(trace_ids)
         self.trace_listbox.delete(0,'end')
@@ -679,9 +760,10 @@ class TracePlotFrame(tk.Frame):
         
     
     def populate_file_listbox(self):
+        debug_print('TracePlotFrame')
         global n_current_file
         # print('populate_file_listbox()')
-
+        
         n_current_file = 0
         self.efs_files = self.controller.frames[StartPage].efs_files
         
@@ -693,9 +775,10 @@ class TracePlotFrame(tk.Frame):
             self.file_listbox.insert('end',el)
         self.file_listbox.select_set(0)
         self.file_listbox_label['text'] = str(n_current_file+1)+" of "+str(len(self.efs_files))+" files"
-        # self.on_file_change()
+        self.on_file_change()
     
     def scroll(self,direction):
+        debug_print('TracePlotFrame')
         #        initial +  (-1/1)  * scroll magnitude       * window width
         t0_new = self.t0 + direction*(self.scroll_percent/100)*(self.tf-self.t0)
         tf_new = self.tf + direction*(self.scroll_percent/100)*(self.tf-self.t0)
@@ -718,6 +801,7 @@ class TracePlotFrame(tk.Frame):
         
         
     def increment_trace(self):
+        debug_print('TracePlotFrame')
         if self.n_current_trace<self.ntr-1: 
             self.n_current_trace += 1
             self.trace_listbox.selection_clear(0,'end')
@@ -726,6 +810,7 @@ class TracePlotFrame(tk.Frame):
             self.refresh()
         
     def decrement_trace(self):
+        debug_print('TracePlotFrame')
         if self.n_current_trace>0: 
             self.n_current_trace -= 1
             self.trace_listbox.selection_clear(0,'end')
@@ -734,6 +819,7 @@ class TracePlotFrame(tk.Frame):
             self.refresh()
 
     def on_trace_change(self):
+        debug_print('TracePlotFrame')
         self.manual_t_range = False
         nsel = self.trace_listbox.curselection()[0]
         self.n_current_trace = nsel
@@ -741,6 +827,7 @@ class TracePlotFrame(tk.Frame):
         self.refresh()
 
     def increment_file(self):
+        debug_print('TracePlotFrame')
         global n_current_file
         # print('DEBUG: ',n_current_file,len(self.efs_files))
         if n_current_file < len(self.efs_files)-1:
@@ -750,6 +837,7 @@ class TracePlotFrame(tk.Frame):
             self.on_file_change()
     
     def decrement_file(self):
+        debug_print('TracePlotFrame')
         global n_current_file
         if n_current_file > 0:
             n_current_file -= 1
@@ -758,6 +846,7 @@ class TracePlotFrame(tk.Frame):
             self.on_file_change()
     
     def on_file_change(self):
+        debug_print('TracePlotFrame')
         # print('on_file_change()')
         global n_current_file
         
@@ -777,6 +866,7 @@ class TracePlotFrame(tk.Frame):
         self.populate_trace_listbox()
     
     def load_file(self):
+        debug_print('TracePlotFrame')
         global n_current_file
         
         # this will soon be an issue
@@ -789,12 +879,14 @@ class TracePlotFrame(tk.Frame):
         self.st_subset = self.st.copy()
     
     def save_figure(self):
+        debug_print('TracePlotFrame')
         Path('figures/').mkdir(exist_ok=True)
         fname = 'figures/'+'.'.join(self.fig_name_list)+'.pdf'
         self.fig.savefig(fname)
         
         
     def refresh_st(self):
+        debug_print('TracePlotFrame')
         # print('refresh_st()')
         # self.efs_pref = copy.deepcopy(self.efs)
         # self.st_pref = self.st_subset.copy()
@@ -886,6 +978,7 @@ class TracePlotFrame(tk.Frame):
         self.refresh()
     
     def refresh(self):
+        debug_print('TracePlotFrame')
         
         # print('refresh()')
         self.ax.clear()
@@ -964,7 +1057,9 @@ class TracePlotFrame(tk.Frame):
         d = tr_pref.data
         self.ax.plot(t,d,c='k',zorder=1,linewidth=0.5,label="Trace")
         self.fig.tight_layout(pad=1.4)
-
+        
+        self.fig.subplots_adjust(left=0.05, bottom=0.07, right=0.95, top=0.95, wspace=0, hspace=0)
+        
         #%% determine and set good xlim and ylim based on what is plotted
         delta_t = self.tf-self.t0
         
@@ -972,12 +1067,15 @@ class TracePlotFrame(tk.Frame):
         time_buffer = (self.perc_time_buffer/100)*delta_t
         # print('t window: ',self.t0+time_buffer,self.tf-time_buffer)
         dwin = d[np.logical_and((t>=self.t0+time_buffer),(t<=self.tf-time_buffer))]
-        d_mean = np.mean(dwin)
+        
+        d_mean = np.nanmean(dwin)
         dmax = max(abs(dwin-d_mean))
+        
         ylimits = (d_mean + np.array([-1,1],dtype=np.float64) * dmax * 1.2)
         self.ax.set_ylim(ylimits)
         
         xlimits = [self.t0,self.tf]
+        
         self.ax.set_xlim(xlimits)
         
         #%%
@@ -1008,10 +1106,12 @@ class TracePlotFrame(tk.Frame):
         props = dict(boxstyle='round', facecolor='white', alpha=0.9)
         self.ax.annotate(textstr,xy=(1,1),xytext=(-5,-5),fontsize=8,xycoords='axes fraction', textcoords='offset points',bbox=props,horizontalalignment='right',verticalalignment='top',zorder=2000)
         
-        self.canvas.draw()
+        # leave these in order. bad things happen otherwise
         self.update()
+        self.canvas.draw()
         
     def on_click(self, event):
+        debug_print('TracePlotFrame')
         # print(self.nclick,[event.xdata,event.ydata])
         # print(event)
         # if on manual zoom
@@ -1037,6 +1137,7 @@ class TracePlotFrame(tk.Frame):
                 print('clicked outside of axes bounds but inside plot window')
     
     def reset_zoom(self):
+        debug_print('TracePlotFrame')
         self.tf = -99999
         self.t0 = 0
         self.zoom_status['text'] = ''
@@ -1044,6 +1145,7 @@ class TracePlotFrame(tk.Frame):
         self.zoom_toggle_button['text'] = 'Change time range'
 
     def zoom_toggle(self):
+        debug_print('TracePlotFrame')
         
         # changing to auto t range
         if self.manual_t_range:
@@ -1084,6 +1186,9 @@ frame_tpf.canvas.callbacks.connect('button_press_event', frame_tpf.on_click)
 
 # stop script on window close
 app.protocol("WM_DELETE_WINDOW", app.quit_program)
+
+app.geometry('1120x530')
+app.minsize(width=DEF_GEOMETRY[1], height=DEF_GEOMETRY[0])
 
 app.mainloop()
 
