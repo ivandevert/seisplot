@@ -5,7 +5,7 @@ Created on Sun Apr 17 08:09:03 2022
 
 @author: ivandevert
 
-something is wrong with picking (maybe in insert_pick_times)
+something is wrong with initializing start and end times
 
 channel naming convention: https://ds.iris.edu/ds/nodes/dmc/data/formats/seed-channel-naming/
     letter order: 
@@ -19,6 +19,7 @@ TO DO:
     add other filters
     add resampling option
     add error logging
+    make yaxis labels constant width
     
 
 """
@@ -28,19 +29,19 @@ import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 
-efspy_module_parent_dir = "/Users/ivandevert/prog/efspy/resources/"
+# efspy_module_parent_dir = "/Users/ivandevert/prog/efspy/resources/"
 
 import sys
-sys.path.insert(1,efspy_module_parent_dir)
-sys.path.append("..")
-sys.path.append("../..")
+# sys.path.insert(1,efspy_module_parent_dir)
+# sys.path.append("..")
+# sys.path.append("../..")
 import numpy as np
 # import struct
 
 
 import obspy
 # from obspy import UTCDateTime, geodetics
-from resources.EFSpy_module import EFS
+from EFSpy_module import EFS
 # from obspy.clients.fdsn import Client
 import os
 from pathlib import Path
@@ -237,7 +238,8 @@ class StartPage(tk.Frame):
         
         ### set default preferences
         # self.efs_parent_dir = '/Users/ivandevert/seis/sample_data/efs_out/ridgecrest2019_sample/efs/2019/07/'
-        self.efs_parent_dir = '/Volumes/ianhdd/projects/ridgecrest2019/efs/2019/07/'
+        # self.efs_parent_dir = '/Volumes/ianhdd/projects/ridgecrest2019/efs/2019/07/'
+        self.efs_parent_dir = '/Volumes/LaCie/EFS_out/ridgecrest2019/efs/2019/07/'
         
         if not os.path.isdir(self.efs_parent_dir): 
             print("not a dir")
@@ -586,8 +588,6 @@ class TracePlotFrame(tk.Frame):
         # end plot picks row
         #%% end pref frame
         
-        # for ii in np.arange(2,self.NCOL-2):
-        #     self.grid_columnconfigure(ii,weight=1)
 #%%
         
         self.n_current_trace = 0
@@ -596,37 +596,16 @@ class TracePlotFrame(tk.Frame):
         
         if n_current_file >= 0:
             self.on_file_change()
-            # self.refresh()
     
     def plot_spectrogram(self):
         tr = self.tr_pref.copy()
-        # d = tr.data
-        # t = tr.times() + tr.stats.pick_data['tdif']
-        
-        # fig = plt.figure()
-        # ax = fig.add_subplot(1,1,1)
-        
         tr.spectrogram()
-        
-        # obspy.imaging.spectrogram.spectrogram(tr.data,tr.stats.sampling_rate,axes=ax)
-        # plt.xticks(ticks=np.arange())
-        
         return
     
     def plot_ppsd(self):
         tr = self.tr_pref
         d = tr.data
-        # t = tr.times()
-        
-        
         Pxx, freqs = plt.psd(d,Fs=tr.stats.sampling_rate)
-        # fig = plt.figure()
-        # ax = fig.add_subplot(1,1,1)
-        
-        # ax.plot(freqs,Pxx)
-        
-        # plt.show()
-        
         return
     
     def filter_traces(self):
@@ -743,56 +722,51 @@ class TracePlotFrame(tk.Frame):
             self.n_current_trace += 1
             self.trace_listbox.selection_clear(0,'end')
             self.trace_listbox.select_set(self.n_current_trace)
-        self.manual_t_range = False
-        self.reset_zoom()
-        self.refresh()
+            self.on_trace_change()
+            self.refresh()
         
     def decrement_trace(self):
         if self.n_current_trace>0: 
             self.n_current_trace -= 1
             self.trace_listbox.selection_clear(0,'end')
             self.trace_listbox.select_set(self.n_current_trace)
+            self.on_trace_change()
+            self.refresh()
+
+    def on_trace_change(self):
         self.manual_t_range = False
+        nsel = self.trace_listbox.curselection()[0]
+        self.n_current_trace = nsel
         self.reset_zoom()
         self.refresh()
-        
+
     def increment_file(self):
         global n_current_file
         # print('DEBUG: ',n_current_file,len(self.efs_files))
         if n_current_file < len(self.efs_files)-1:
             n_current_file += 1
-            self.n_current_trace = 0
-            self.t0 = 0
-            self.tf = -99999
             self.file_listbox.selection_clear(0,'end')
             self.file_listbox.select_set(n_current_file)
-        self.on_file_change()
+            self.on_file_change()
     
     def decrement_file(self):
         global n_current_file
         if n_current_file > 0:
             n_current_file -= 1
-            self.n_current_trace = 0
-            self.t0 = 0
-            self.tf = -99999
             self.file_listbox.selection_clear(0,'end')
             self.file_listbox.select_set(n_current_file)
-        self.on_file_change()
-    
-    def on_trace_selection_change(self):
-        nsel = self.trace_listbox.curselection()[0]
-        self.n_current_trace = nsel
-        self.refresh()
+            self.on_file_change()
     
     def on_file_change(self):
         # print('on_file_change()')
-        global efs_path
         global n_current_file
         
         self.efs_files = self.controller.frames[StartPage].efs_files
         
         n_current_file = self.file_listbox.curselection()[0]
         self.n_current_trace = 0
+        
+        self.reset_zoom()
         
         self.load_file()
         self.filter_traces()
@@ -936,7 +910,7 @@ class TracePlotFrame(tk.Frame):
         self.pref_plot_picks = self.plot_picks_box.get()
         self.nclick = 0
         
-        # time array
+        # time array relative to eq origin time
         t = tr_pref.times() + tdif
         self.tmin = min(t)
         self.tmax = max(t)
@@ -946,7 +920,7 @@ class TracePlotFrame(tk.Frame):
             
             # only plot picks if there are picks
             if len(pickt)>0:
-                pickt = pickt + tdif 
+                pickt = pickt + tdif
                 # setup color array
                 pickc = copy.deepcopy(pickn)
                 pickc[pickn=='P']=self.p_c
@@ -980,7 +954,7 @@ class TracePlotFrame(tk.Frame):
             self.tf = t[-1]
             self.perc_time_buffer = 1
         else:
-            # if two limits have just been chosen, set t0,tf here
+            # this is weird, revise
             if self.nclick==0:
                 # print(self.t0,self.tf)
                 self.nclick = 1
@@ -993,6 +967,8 @@ class TracePlotFrame(tk.Frame):
 
         #%% determine and set good xlim and ylim based on what is plotted
         delta_t = self.tf-self.t0
+        
+        # time_buffer is the amount of time on edges of trace to exclude from dmax calculation
         time_buffer = (self.perc_time_buffer/100)*delta_t
         # print('t window: ',self.t0+time_buffer,self.tf-time_buffer)
         dwin = d[np.logical_and((t>=self.t0+time_buffer),(t<=self.tf-time_buffer))]
@@ -1062,20 +1038,21 @@ class TracePlotFrame(tk.Frame):
     
     def reset_zoom(self):
         self.tf = -99999
-        
+        self.t0 = 0
+        self.zoom_status['text'] = ''
+        self.manual_t_range = False
+        self.zoom_toggle_button['text'] = 'Change time range'
+
     def zoom_toggle(self):
         
         # changing to auto t range
         if self.manual_t_range:
-            self.manual_t_range = False
-            self.zoom_toggle_button['text'] = 'Change time range'
-            self.zoom_status['text'] = ''
             self.reset_zoom()
             
         # changing to manual t range
         else:
             self.manual_t_range = True
-            self.zoom_toggle_button['text'] = 'Full time range'
+            self.zoom_toggle_button['text'] = 'Reset zoom'
             self.zoom_status['text'] = 'Select t1'
             
         self.refresh()
@@ -1094,7 +1071,7 @@ frame_tpf.f3_entry.bind('<FocusOut>', lambda _: frame_tpf.refresh_st())
 frame_tpf.plot_picks_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.refresh_st())
 
 frame_tpf.file_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_file_change())
-frame_tpf.trace_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_trace_selection_change())
+frame_tpf.trace_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_trace_change())
 
 # trace filtering
 frame_tpf.trace_filter_id_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_traces())
