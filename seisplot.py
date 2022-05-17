@@ -5,8 +5,6 @@ Created on Sun Apr 17 08:09:03 2022
 
 @author: ivandevert
 
-something is wrong with initializing start and end times
-
 channel naming convention: https://ds.iris.edu/ds/nodes/dmc/data/formats/seed-channel-naming/
     letter order: 
         band code (sampling rate and response band of the instrument)
@@ -22,6 +20,12 @@ TO DO:
     make yaxis labels constant width
     redo startpage logic/flow
     add plot settings bar
+    add record section plot button
+    filter out noisy spectrograms (seismograms?)
+    spectrogram colorbar
+    absolute vs relative time
+    add ability for custom functions
+    something is wrong with initializing start and end times
     
     bug: when the parent efs folder doesn't exist, the plot is not sized correctly
     
@@ -64,6 +68,7 @@ from pathlib import Path
 import copy
 from tkinter import filedialog
 import inspect
+from configparser import ConfigParser
 
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg #, NavigationToolbar2Tk
@@ -72,18 +77,127 @@ from matplotlib.figure import Figure
 from scipy import signal
 # from matplotlib.backend_bases import key_press_handler
 
+# constants for program, don't change
 LARGE_FONT= ("Verdana", 12)
 DEF_GEOMETRY = [530, 1120]
 DEF_CANVAS_GEOMETRY = [455, 845]
 geostr = '1120x530'
-DEBUG = True
+
+global CONFIG_FILENAME
+CONFIG_FILENAME = 'config.ini'
+
+def init_config_file():
+    """
+    Generates a configuration file. This will only be run once, or when
+    config.ini does not exist in the same directory.
+
+    Returns
+    -------
+    None.
+
+    """
+    debug_print('main')
+    config = ConfigParser()
+    config.add_section('settings')
+    config.set('settings', 'config_default_filepath', '~/')
+    config.set('settings', 'config_p_wave_color', 'r')
+    config.set('settings', 'config_s_wave_color', 'c')
+    config.set('settings', 'config_debug_mode', 'False')
+    
+    config.write(open('config.ini', 'w'))
+    return
+    
+
+def load_config():
+    """
+    Loads configuration settings from the configuration file. This is only used
+    once per script execution.
+
+    Returns
+    -------
+    None.
+
+    """
+    debug_print('main')
+    global CONFIG_FILENAME
+    global config_default_filepath
+    global config_p_wave_color
+    global config_s_wave_color
+    global config_debug_mode
+    config = ConfigParser()
+    
+    if not os.path.isfile(CONFIG_FILENAME): init_config_file()
+    config.read(CONFIG_FILENAME)
+    
+    config_default_filepath = config.get('settings', 'config_default_filepath')
+    config_p_wave_color = config.get('settings', 'config_p_wave_color')
+    config_s_wave_color = config.get('settings', 'config_s_wave_color')
+    config_debug_mode = config.get('settings', 'config_debug_mode')
+    return
+
+def save_config(setting_name, setting_value):
+    """
+    Saves a single configuration setting to the configuration file.
+
+    Parameters
+    ----------
+    setting_name : string
+        Name of the setting.
+    setting_value : any (converts to string)
+        Value to store.
+
+    Returns
+    -------
+    None.
+
+    """
+    debug_print('main')
+    global CONFIG_FILENAME
+    
+    config = ConfigParser()
+    config.read(CONFIG_FILENAME)
+    config.set('settings', setting_name, setting_value)
+    print("CHANGING: ", setting_name, " to ", str(setting_value))
+    config.write(open(CONFIG_FILENAME, 'w'))
+    return
 
 def debug_print(parent_name):
-    if DEBUG:
+    """
+    If config_debug_mode is True, this will print the parent_name followed by
+    the calling function's name. This is currently at the beginning of every
+    function to allow for easy debugging.
+
+    Parameters
+    ----------
+    parent_name : string
+        Name of the parent class or function.
+
+    Returns
+    -------
+    None.
+
+    """
+    global config_debug_mode
+    if config_debug_mode:
         print('DEBUG: ', parent_name, inspect.currentframe().f_back.f_code.co_name)
         
 
 def slash(pth):
+    """
+    Appends a slash to the path string if necessary. Returns a slash if the 
+    string is empty.
+
+    Parameters
+    ----------
+    pth : string
+        Path as a string.
+
+    Returns
+    -------
+    string
+        String where the last character is a slash.
+
+    """
     if len(str(pth))>0:
         if str(pth)[-1]!='/':
             return str(pth)+'/'
@@ -95,17 +209,22 @@ def slash(pth):
 
 def get_picks(tr):
     """
-
+    Get all pick data from an input trace.
+    
+    POSSIBLE ISSUE: might not work with other file formats.
+    TO DO: clean up and optimize if possible
+    
     Parameters
     ----------
     tr : obspy.trace or efs.waveforms[n] (dict)
-        trace to get picks from.
+        Trace to get picks from.
 
     Returns
     -------
     pick_names, pick_times (relative to first sample), pick qualities
 
     """
+    debug_print('main')
     # efs standard pick labels
     picklabels = ['pick1','pick2','pick3','pick4']
     # # pick time
@@ -123,13 +242,41 @@ def get_picks(tr):
     # for efs objects
     elif type(tr)==dict:
         for pt in picklabels:
-            if tr[pt+"name"] != '    ':
+            if tr[pt+"name"] != '    ': # maybe use .strip() != '' or something
                 picks = np.append(picks,tr[pt])
                 pick_names = np.append(pick_names,tr[pt+"name"].strip())
                 pick_qualities = np.append(pick_qualities,float(tr[pt+"q"]))
     return pick_names,picks,pick_qualities
 
 def best_picks(pickn,pickt,pickq):
+    """
+    Returns one of each pick type corresponding to that pick type's highest
+    quality pick.
+    
+    TO DO: pickq of 0.1 comes from my pick inserting function. This should be
+    coded differently.
+
+    Parameters
+    ----------
+    pickn : numpy array of strings
+        Names of the picks (contents of each pick#name field).
+    pickt : numpy array of floats
+        Pick times.
+    pickq : numpy array of floats
+        Qualities of the picks.
+
+    Returns
+    -------
+    pickn : numpy array of strings
+        Pick names.
+    pickt : numpy array of floats
+        Pick times.
+    pickq : numpy array of floats
+        Pick qualities.
+
+    """
+    
+    debug_print('main')
     # returns one of each of the pick types with the highest pick quality
     if len(pickn)>2:
         if len(pickn[pickn=='P'])>1:
@@ -146,9 +293,46 @@ def best_picks(pickn,pickt,pickq):
     return pickn,pickt,pickq
 
 def get_files(path,filetype):
-    return [str(path)+el for el in os.listdir(path) if el[-len(filetype):]==filetype]
+    """
+    Return the full path of all files of a given filetype in a given directory.
+
+    Parameters
+    ----------
+    path : string
+        Directory to search for files in.
+    filetype : string
+        File extension to search for. Ex: '.efs', '.sac', etc.
+
+    Returns
+    -------
+    list
+        List of full paths of all files matching given filetype.
+
+    """
+    
+    debug_print('main')
+    filetype = filetype.lower()
+    return [str(path)+el for el in os.listdir(path) if el[-len(filetype):].lower()==filetype]
 
 def popup(title,message_str):
+    """
+    Generates a popup window with a given message. This does not format the
+    string.
+
+    Parameters
+    ----------
+    title : string
+        Title of the popup window.
+    message_str : string
+        Message to display in the popup window.
+
+    Returns
+    -------
+    None.
+
+    """
+    
+    debug_print('main')
     win = tk.Toplevel()
     win.wm_title(title)
 
@@ -159,6 +343,8 @@ def popup(title,message_str):
     b.grid(row=1, column=0)
     
 def popup_response(frame):
+    
+    debug_print('main')
     tp = frame.pref_filter_type
     freq = frame.pref_filter_freq
     f1 = frame.pref_filter_bp_fmin
@@ -178,8 +364,6 @@ def popup_response(frame):
     else:
         print('error showing response')
         return
-    
-    
 
     b, a = signal.iirfilter(corners,F,btype=btype,ftype='butter')
     w, h = signal.freqz(b,a,fs=f_nyquist*2,worN=512)
@@ -198,13 +382,21 @@ def popup_response(frame):
     ax.grid(which='both', axis='both')
     plt.show()
 
-class TraceViewer(tk.Tk):
+class SeisPlot(tk.Tk):
+    """
+    Main frame that initializes and controls the other frames.
+    
+    """
 
     def __init__(self, *args, **kwargs):
+        """
+        Initialization function
+        
+        """
         global filepath
         global n_current_file
 
-        debug_print('TraceViewer')
+        debug_print('SeisPlot')
         
         
         tk.Tk.__init__(self, *args, **kwargs)
@@ -231,7 +423,20 @@ class TraceViewer(tk.Tk):
         self.show_frame(StartPage)
 
     def show_frame(self, cont):
-        debug_print('TraceViewer')
+        """
+        Put a given frame on top of the gui
+
+        Parameters
+        ----------
+        cont : tk.Frame
+            Frame to show.
+
+        Returns
+        -------
+        None.
+
+        """
+        debug_print('SeisPlot')
 
         show = True
         if cont==TracePlotFrame:
@@ -243,34 +448,39 @@ class TraceViewer(tk.Tk):
             frame = self.frames[cont]
             if cont==TracePlotFrame: frame.refresh_st()
             frame.tkraise()
+    
     def quit_program(self):
-        debug_print('TraceViewer')
+        """
+        Holds code to run when gui is exited.
+        
+
+        """
+        debug_print('SeisPlot')
         self.destroy()
         self.quit()
 
 class StartPage(tk.Frame):
+    """
+    Frame showing directory selection, plot, and quit buttons    
+    
+    """
 
     def __init__(self, parent, controller):
+        """
+        Initialize the StartPage frame.
+
+        """
         debug_print('StartPage')
         
-        
-        # print('parent n current: ')
         global n_current_file
+        global config_default_filepath
+        
         n_current_file = -1
         self.controller = controller
         self.parent = parent
         self.efs_files = []
         
-        # print('DEBUG: ',dir(controller))
-        
-        ### set default preferences
-        self.efs_parent_dir = '/Users/ivandevert/seis/sample_data/efs_out/ridgecrest2019_sample/efs/2019/07/'
-        # self.efs_parent_dir = '/Volumes/ianhdd/projects/ridgecrest2019/efs/2019/07/'
-        # self.efs_parent_dir = '/Volumes/LaCie/EFS_out/ridgecrest2019/efs/2019/07/'
-        
-        # if not os.path.isdir(self.efs_parent_dir): 
-        #     print("not a dir")
-        #     self.efs_parent_dir = "/"
+        self.efs_parent_dir = config_default_filepath
         
         tk.Frame.__init__(self,parent)
         
@@ -302,33 +512,49 @@ class StartPage(tk.Frame):
         self.check_dir()
     
     def check_dir(self):
+        """
+        Checks if efs_parent_dir exists contains files and handles cases 
+        accordingly.
+
+        Raises
+        ------
+        ValueError
+            Hopefully this won't be raised. If it is, idk what happened.
+
+        TO DO: get_files is called here and in update_files() if nfiles > 0. 
+            This could be slow with directories containing many files. Should 
+            update this logic.
+
+        """
         debug_print('StartPage')
-        # checks if efs_parent_dir exists and has files in it, and handles cases accordingly.
-        # only call update_files() if seismogram files are found.
         
+        # case for the directory not existing
         if not os.path.isdir(self.efs_parent_dir): 
-            # print("not a dir")
             self.file_count_label['text'] = 'Directory does not exist. Please choose a new directory.'
             self.file_count_label['fg'] = 'black'
             self.plot_button['state'] = 'disabled'
         
+        # cases where the directory exists
         elif os.path.isdir(self.efs_parent_dir):
             
             nfiles = len(get_files(self.efs_parent_dir, '.efs'))
+            
+            # case where there are files in the directory
             if nfiles > 0:
                 self.file_count_label['text'] = str(nfiles) + ' files found.'
                 self.file_count_label['fg'] = 'green'
                 self.plot_button['state'] = 'enabled'
+                print(self.efs_parent_dir)
+                save_config('config_default_filepath', self.efs_parent_dir)
                 self.update_files()
             
+            # case where directory contains no files
             else:
                 self.file_count_label['text'] = 'No files found in selected directory.'
                 self.file_count_label['fg'] = 'red'
                 self.plot_button['state'] = 'disabled'
         else:
-            raise ValueError
-            # self.efs_parent_dir = "/"
-
+            raise ValueError('Unknown error')
     
     def change_efs_parent_dir(self):
         debug_print('StartPage')
@@ -367,6 +593,8 @@ class TracePlotFrame(tk.Frame):
     def __init__(self,parent,controller):
         debug_print('TracePlotFrame')
         global n_current_file
+        global config_p_wave_color
+        global config_s_wave_color
         # print(dir(parent))
         self.controller = controller
         self.parent = parent
@@ -397,8 +625,8 @@ class TracePlotFrame(tk.Frame):
         self.scroll_percent = 10
         
         # plotting colors
-        self.p_c = 'r'
-        self.s_c = 'c'
+        self.p_c = config_p_wave_color
+        self.s_c = config_s_wave_color
         
         # convert pref into str
         demean_values = ['None','Demean','Detrend']
@@ -648,8 +876,6 @@ class TracePlotFrame(tk.Frame):
         self.plot_picks_box.set(self.pref_plot_picks)
         
         #%% make resizeable 
-        # Grid.rowconfigure(self, 0, weight=1)
-        # Grid.columnconfigure(self, 0, weight=1)
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=1)
@@ -1159,7 +1385,13 @@ class TracePlotFrame(tk.Frame):
             
         self.refresh()
 
-app = TraceViewer()
+#%% Program starts here
+
+#%% LOAD SETTINGS
+global config_debug_mode
+load_config()
+
+app = SeisPlot()
 frame_tpf = app.frames[TracePlotFrame]
 frame_start = app.frames[StartPage]
 
