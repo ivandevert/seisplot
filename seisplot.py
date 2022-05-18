@@ -26,6 +26,8 @@ TO DO:
     absolute vs relative time
     add ability for custom functions
     something is wrong with initializing start and end times
+    save config info on exit
+    organize functions in the TracePlotFrame class
     
     bug: when the parent efs folder doesn't exist, the plot is not sized correctly
     
@@ -86,6 +88,15 @@ geostr = '1120x530'
 global CONFIG_FILENAME
 CONFIG_FILENAME = 'config.ini'
 
+def str2bool(string):
+    S = string.lower()
+    if S=='true':
+        return True
+    elif S=='false':
+        return False
+    else:
+        raise ValueError("Acceptable string values are True or False (case insensitive)")
+
 def init_config_file():
     """
     Generates a configuration file. This will only be run once, or when
@@ -118,7 +129,11 @@ def load_config():
     None.
 
     """
-    debug_print('main')
+    try: 
+        debug_print('main')
+    except:
+        print('DEBUG: main load_config (manual)')
+    
     global CONFIG_FILENAME
     global config_default_filepath
     global config_p_wave_color
@@ -129,10 +144,11 @@ def load_config():
     if not os.path.isfile(CONFIG_FILENAME): init_config_file()
     config.read(CONFIG_FILENAME)
     
-    config_default_filepath = config.get('settings', 'config_default_filepath')
-    config_p_wave_color = config.get('settings', 'config_p_wave_color')
-    config_s_wave_color = config.get('settings', 'config_s_wave_color')
-    config_debug_mode = config.get('settings', 'config_debug_mode')
+    config_default_filepath = config.get('settings', 'config_default_filepath').strip()
+    config_p_wave_color = config.get('settings', 'config_p_wave_color').strip()
+    config_s_wave_color = config.get('settings', 'config_s_wave_color').strip()
+    config_debug_mode = str2bool(config.get('settings', 'config_debug_mode').strip())
+    print('DEBUGGING: ', config_debug_mode)
     return
 
 def save_config(setting_name, setting_value):
@@ -157,7 +173,7 @@ def save_config(setting_name, setting_value):
     config = ConfigParser()
     config.read(CONFIG_FILENAME)
     config.set('settings', setting_name, setting_value)
-    print("CHANGING: ", setting_name, " to ", str(setting_value))
+    # print("CHANGING: ", setting_name, " to ", str(setting_value))
     config.write(open(CONFIG_FILENAME, 'w'))
     return
 
@@ -178,7 +194,7 @@ def debug_print(parent_name):
 
     """
     global config_debug_mode
-    if config_debug_mode:
+    if config_debug_mode==True:
         print('DEBUG: ', parent_name, inspect.currentframe().f_back.f_code.co_name)
         
 
@@ -544,7 +560,7 @@ class StartPage(tk.Frame):
                 self.file_count_label['text'] = str(nfiles) + ' files found.'
                 self.file_count_label['fg'] = 'green'
                 self.plot_button['state'] = 'enabled'
-                print(self.efs_parent_dir)
+                # print(self.efs_parent_dir)
                 save_config('config_default_filepath', self.efs_parent_dir)
                 self.update_files()
             
@@ -557,6 +573,17 @@ class StartPage(tk.Frame):
             raise ValueError('Unknown error')
     
     def change_efs_parent_dir(self):
+        """
+        Generates a window to change the seismogram file parent directory and 
+        calls check_dir() and populate_file_listbox() if it is not '/'
+        
+        Maybe populate_file_listbox() should be called in update_files()?
+
+        Returns
+        -------
+        None.
+
+        """
         debug_print('StartPage')
         folder_path = filedialog.askdirectory(initialdir=self.efs_parent_dir,title='Select the folder containing EFS files')
         
@@ -566,20 +593,27 @@ class StartPage(tk.Frame):
             self.controller.frames[TracePlotFrame].populate_file_listbox()
         
     def update_files(self):
+        """
+        Updates the GUI objects relating to parent path, 
+
+        Returns
+        -------
+        None.
+
+        """
         debug_print('StartPage')
-        # self.controller.geometry(geostr)
-        # print('update_files()')
         global filepath
         global n_current_file
-        # print('DEBUG:',cont.frames)
+        
         # update project path
         self.disp_efs_parent_dir['text'] = self.efs_parent_dir
         
-        # update project name        
+        # search dir for files and sort them     
         self.efs_files = get_files(self.efs_parent_dir,'.efs')
         self.efs_files.sort(reverse=False)
-        # print(len(self.efs_files),' efs files found')
         
+        # if directory has files, set globals n_current_file and filepath, 
+        # otherwise set them to flag/null values
         if len(self.efs_files)>0:
             n_current_file = 0
             filepath = self.efs_files[n_current_file]
@@ -589,25 +623,36 @@ class StartPage(tk.Frame):
         
 
 class TracePlotFrame(tk.Frame):
+    """
+    This is where everything is plotted
+    
+    """
     
     def __init__(self,parent,controller):
+        """
+        Initialize the TracePlotFrame frame
+        
+        """
+        
         debug_print('TracePlotFrame')
         global n_current_file
         global config_p_wave_color
         global config_s_wave_color
-        # print(dir(parent))
+        
+        # store controller/parent in object so they can be used outside init
         self.controller = controller
         self.parent = parent
         
+        # get the files list and parent directory
         self.efs_files = self.controller.frames[StartPage].efs_files
         self.efs_parent_dir = self.controller.frames[StartPage].efs_parent_dir
-        # self.n_current_file = self.controller.frames[StartPage].n_current_file
-        
+                
         self.NCOL = 14
-        # print("TracePlotFrame.__init__()")
-        # change freq defaults to be based on sample rate
+                
+        ### set default preferences. These should eventually be stored in the 
+        # config.ini file
         
-        ### set default preferences
+        # Filtering #
         self.pref_demean = 1                # (0) none, (1) demean, (2) simple detrend
         self.pref_filter_type = 'highpass'  # 'none', 'lowpass', 'highpass', 'bandpass'
         self.pref_filter_freq = 5           # default freq for lowpass and highpass
@@ -617,33 +662,44 @@ class TracePlotFrame(tk.Frame):
         self.pref_id_filter_str = '*,*,*,*'
         self.pref_dist1_filter = 0
         self.pref_dist2_filter = 99999
-
-        # triggers zooming function
-        self.manual_t_range = False
-        self.nclick = 1
-        self.manual_t_range_str = 'Change time range'
-        self.scroll_percent = 10
-        
-        # plotting colors
-        self.p_c = config_p_wave_color
-        self.s_c = config_s_wave_color
-        
-        # convert pref into str
-        demean_values = ['None','Demean','Detrend']
-        self.pref_demean_str = demean_values[self.pref_demean]
         
         self.pref_plot_picks = 'Real'       # T/F plot picks
         
-        self.DEFAULT_ID_FILTER_STR = '*,*,*,*'
+        # convert pref into str. Can probably do this later and have GUI set to 'null' at first.
+        demean_values = ['None','Demean','Detrend']
+        self.pref_demean_str = demean_values[self.pref_demean]
+                
+        # variables that hold values used for triggering
+        self.manual_t_range = False
+        self.nclick = 1
         
+        # load other preferences
+        self.p_c = config_p_wave_color
+        self.s_c = config_s_wave_color
+        
+        ### program constants that really don't need to be changed, but I guess they could be
+        self.scroll_percent = 10
+        
+        # GUI layout variables
         box_width = 10
         col_lb1_width = 12
         
-        
+        # initialize something? idk what this is for actually but the program breaks without it
         tk.Frame.__init__(self,parent)
         
 #%% GUI Layout
-
+        """
+        The GUI is designed to have a single "parent parent" frame (main_frame), populated 
+        with several gridded parent frames (labelled below), each with their own children and 
+        layout. An exception is the canvas_frame, which is a tk.Canvas object and
+        doesn't behave exactly the same.
+        
+        See https://tkdocs.com/tutorial/grid.html for info on grid and pack functions.        
+        
+        Also see the GUI layout figure in the /docs/ folder
+        """
+        
+        # "parent parent" frame
         main_frame = tk.Frame(self)
         main_frame.grid(row=0,column=0, sticky='nsew')
         
@@ -709,25 +765,18 @@ class TracePlotFrame(tk.Frame):
         ### end file nav frame
         
         #%% canvas frame
-        # self.fig = Figure(figsize=(10,5), dpi=100)
         self.fig = Figure(dpi=100,tight_layout=True, figsize=np.flip(DEF_CANVAS_GEOMETRY)/100)
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.canvas_frame)
-        
         
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.pack(fill='both',expand=True)
         self.canvas_frame.itemconfigure(self.canvas, width=DEF_CANVAS_GEOMETRY[1], height=DEF_CANVAS_GEOMETRY[0])
         self.canvas_frame.config(width=DEF_CANVAS_GEOMETRY[1], height=DEF_CANVAS_GEOMETRY[0])
-        # self.canvas.draw()
-        # self.canvas_frame.draw()
-        
-        # self.canvas_widget.
-        # self.canvas._tkcanvas.pack()
         ### end canvas frame
         
         #%% canvas navigation frame
-        self.zoom_toggle_button = ttk.Button(canvas_nav_frame,text=self.manual_t_range_str, command=lambda: self.zoom_toggle())
+        self.zoom_toggle_button = ttk.Button(canvas_nav_frame,text='Change time range', command=lambda: self.zoom_toggle())
         self.zoom_toggle_button.pack(side='left')
         self.zoom_status = tk.Label(canvas_nav_frame,text='',fg='red',width=20)
         self.zoom_status.pack(side='left')
@@ -778,7 +827,6 @@ class TracePlotFrame(tk.Frame):
         trace_filter_distance_label = tk.Label(trace_filter_frame,text='Distance (km): ',anchor='w')
         trace_filter_to_label = tk.Label(trace_filter_frame,text='to',width=1)
         
-        
         component_var = tk.StringVar()
         dist1_var = tk.StringVar()
         dist2_var = tk.StringVar()
@@ -811,7 +859,6 @@ class TracePlotFrame(tk.Frame):
         # trace_sort_frame = tk.Frame(trace_nav_frame)
         # trace_sort_frame.grid(row=4)
         
-        
         # self.trace_sort_order_button = ttk.Button(trace_sort_frame,text='Sorting by ('+self.trace_order_text+'): ',command=lambda: self.on_change_trace_order_press())
         # self.radio_sort_abc = ttk.Radiobutton(trace_sort_frame, text='Alphabetical', value='abc', variable=selected)
         # self.radio_sort_distance = ttk.Radiobutton(trace_sort_frame, text='Distance', value='distance', variable=selected)
@@ -843,7 +890,7 @@ class TracePlotFrame(tk.Frame):
         self.f2_label = tk.Label(pref_frame,text='null',anchor='e') # ,width=col_lb1_width
         self.f3_label = tk.Label(pref_frame,text='null',anchor='e')
         
-        self.f1_entry = ttk.Spinbox(pref_frame,width=3,from_=0.01,to=100.0)
+        self.f1_entry = ttk.Spinbox(pref_frame,width=3,from_=0.001,to=100.0)
         self.f2_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
         self.f3_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
         self.show_response_button = ttk.Button(pref_frame,text='Response',command=lambda:popup_response(self))
@@ -875,15 +922,13 @@ class TracePlotFrame(tk.Frame):
         self.plot_picks_box.grid(column=1,row=2,sticky='w')
         self.plot_picks_box.set(self.pref_plot_picks)
         
-        #%% make resizeable 
+        #%% these lines allow canvas_frame to change shape on window resize
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=1)
         main_frame.columnconfigure(1, weight=1)
         # self.canvas.draw()
         
-        if n_current_file >= 0:
-            self.populate_file_listbox()
         # end plot picks row
         #%% end pref frame
         
@@ -895,163 +940,38 @@ class TracePlotFrame(tk.Frame):
         self.t0 = 0
         self.tf = -99999
         
-        # print(n_current_file)
+        # if n_current_file isn't a -1 flag, 
         if n_current_file >= 0:
-            self.on_file_change()
+            self.populate_file_listbox()
+        
+        # this used to be a repeat, since on_file_change() is called in populate_file_listbox()
+        # print(n_current_file)
+        # if n_current_file >= 0:
+        #     self.on_file_change()
     
-    def plot_spectrogram(self):
-        debug_print('TracePlotFrame')
-        tr = self.tr_pref.copy()
-        tr.spectrogram()
-        return
-    
-    def plot_ppsd(self):
-        debug_print('TracePlotFrame')
-        tr = self.tr_pref
-        d = tr.data
-        Pxx, freqs = plt.psd(d,Fs=tr.stats.sampling_rate)
-        return
-    
-    def filter_traces(self):
-        debug_print('TracePlotFrame')
-        id_str = self.trace_filter_id_entry.get()
-        dist1 = float(self.trace_filter_dist1_entry.get())
-        dist2 = float(self.trace_filter_dist2_entry.get())
-        
-        # if nothing changed, return
-        if id_str == self.pref_id_filter_str and dist1 == self.pref_dist1_filter and dist2 == self.pref_dist2_filter: 
-            return
-        else:
-            try:
-                network_str,station_str,location_str,channel_str = id_str.lower().split(',')
-                self.st_subset = self.st.select(network=network_str,station=station_str,location=location_str,channel=channel_str)
-                
-                for tr in self.st_subset:
-                    deldist = tr.stats.station_data['deldist']
-                    if deldist < dist1 or deldist > dist2:
-                        self.st_subset.remove(tr)
-            except Exception as err:
-                print("Invalid string entry. Please try again (click ? for help)")
-                print(err)
-                return
-        self.populate_trace_listbox()
-        self.n_current_trace = 0
-        self.refresh_st()
-        
-        return
-        
-    def filter_help_popup(self):
-        debug_print('TracePlotFrame')
-        lines = ['Enter Unix-style, comma-separated strings to filter out certain traces. ',
-                 '* is a wildcard for one or more characters',
-                 '? is a wildcard for exactly one character',
-                 'bracketed [] characters match on any character inside the brackets',
-                 " ",
-                 'Format: \"NET,STA,LOC,CHA\"',
-                 'where each of the above comma-separated values represents a search string',
-                 'for the corresponding property.',
-                 ' ',
-                 'Example: \"*,*,*,H?[ew]\"',
-                 '\t- All networks, stations, and locations are kept',
-                 '\t- Channels whose first character is H, second character is anything,',
-                 '\t  and third character is either E or W are kept',
-                 ' ',
-                 'See documentation for obspy.core.stream.Stream.select for more info.']
-        
-        message_str = '\n'.join(lines)
-        popup('Station ID filtering',message_str)
-    
-    # def on_change_trace_order_press(self):
-        
-    #     if self.trace_sort_ascend:
-    #         self.trace_sort_ascend = False
-    #         self.trace_order_text = 'descend'
-    #     else:
-    #         self.trace_sort_ascend = True
-    #         self.trace_order_text = 'ascend'
-    #     self.trace_sort_order_button['text'] = 'Sorting by ('+self.trace_order_text+'): '
-    
-    def populate_trace_listbox(self):
-        debug_print('TracePlotFrame')
-        trace_ids = [str(el).split('|')[0].strip() for el in self.st_subset.traces]
-        self.ntr = len(trace_ids)
-        self.trace_listbox.delete(0,'end')
-        
-        if self.ntr > 0:
-            for el in trace_ids:
-                self.trace_listbox.insert('end',el)
-        else:
-            self.trace_listbox.insert('end','No traces available')
-        self.trace_listbox.select_set(0)
-        
+#%% FILE NAVIGATION FUNCTIONS
     
     def populate_file_listbox(self):
+        """
+        Populates the file listbox with filenames in the efs_files list.
+
+        """
         debug_print('TracePlotFrame')
         global n_current_file
-        # print('populate_file_listbox()')
         
         n_current_file = 0
         self.efs_files = self.controller.frames[StartPage].efs_files
         
-        filenames = [el.split('/')[-1].split('.')[0] for el in self.efs_files]
+        # filenames = [el.split('/')[-1].split('.')[0] for el in self.efs_files] # this lists the filenames without the extension
+        filenames = [el.split('/')[-1] for el in self.efs_files]
         self.nfiles = len(filenames)
         self.file_listbox.delete(0,'end')
-        # print(filenames)
         for el in filenames:
             self.file_listbox.insert('end',el)
         self.file_listbox.select_set(0)
         self.file_listbox_label['text'] = str(n_current_file+1)+" of "+str(len(self.efs_files))+" files"
         self.on_file_change()
     
-    def scroll(self,direction):
-        debug_print('TracePlotFrame')
-        #        initial +  (-1/1)  * scroll magnitude       * window width
-        t0_new = self.t0 + direction*(self.scroll_percent/100)*(self.tf-self.t0)
-        tf_new = self.tf + direction*(self.scroll_percent/100)*(self.tf-self.t0)
-        
-        # if trying to scroll too far left
-        if t0_new <= self.tmin:
-            t_shift = direction*(self.t0-self.tmin)
-        
-        # if new t0, tf are between tmin, tmax
-        elif t0_new > self.tmin and tf_new < self.tmax:
-            t_shift = direction * (self.scroll_percent/100)*(self.tf-self.t0)
-
-        # if trying to scroll too far right
-        elif tf_new >= self.tmax:
-            t_shift = direction*(self.tmax - self.tf)
-
-        self.t0 = self.t0 + t_shift
-        self.tf = self.tf + t_shift
-        self.refresh()
-        
-        
-    def increment_trace(self):
-        debug_print('TracePlotFrame')
-        if self.n_current_trace<self.ntr-1: 
-            self.n_current_trace += 1
-            self.trace_listbox.selection_clear(0,'end')
-            self.trace_listbox.select_set(self.n_current_trace)
-            self.on_trace_change()
-            self.refresh()
-        
-    def decrement_trace(self):
-        debug_print('TracePlotFrame')
-        if self.n_current_trace>0: 
-            self.n_current_trace -= 1
-            self.trace_listbox.selection_clear(0,'end')
-            self.trace_listbox.select_set(self.n_current_trace)
-            self.on_trace_change()
-            self.refresh()
-
-    def on_trace_change(self):
-        debug_print('TracePlotFrame')
-        self.manual_t_range = False
-        nsel = self.trace_listbox.curselection()[0]
-        self.n_current_trace = nsel
-        self.reset_zoom()
-        self.refresh()
-
     def increment_file(self):
         debug_print('TracePlotFrame')
         global n_current_file
@@ -1084,7 +1004,7 @@ class TracePlotFrame(tk.Frame):
         self.reset_zoom()
         
         self.load_file()
-        self.filter_traces()
+        self.filter_trace_list()
         
         self.file_listbox_label['text'] = str(n_current_file+1)+" of "+str(len(self.efs_files))+" files"
         
@@ -1103,46 +1023,297 @@ class TracePlotFrame(tk.Frame):
         
         self.st = self.efs_pref.to_obspy(keep_pkdata=True)
         self.st_subset = self.st.copy()
+        
+#%% TRACE NAVIGATION FUNCTIONS
     
+    def populate_trace_listbox(self):
+        """
+        Populates the trace listbox with traces in the st_subset Stream object.
+
+        """
+        debug_print('TracePlotFrame')
+        trace_ids = [str(el).split('|')[0].strip() for el in self.st_subset.traces]
+        self.ntr = len(trace_ids)
+        self.trace_listbox.delete(0,'end')
+        
+        if self.ntr > 0:
+            for el in trace_ids:
+                self.trace_listbox.insert('end',el)
+        else:
+            self.trace_listbox.insert('end','No traces available')
+        self.trace_listbox.select_set(0)
+        
+    def increment_trace(self):
+        debug_print('TracePlotFrame')
+        if self.n_current_trace<self.ntr-1: 
+            self.n_current_trace += 1
+            self.trace_listbox.selection_clear(0,'end')
+            self.trace_listbox.select_set(self.n_current_trace)
+            self.on_trace_change()
+            self.refresh()
+        
+    def decrement_trace(self):
+        debug_print('TracePlotFrame')
+        if self.n_current_trace>0: 
+            self.n_current_trace -= 1
+            self.trace_listbox.selection_clear(0,'end')
+            self.trace_listbox.select_set(self.n_current_trace)
+            self.on_trace_change()
+            self.refresh()
+
+    def on_trace_change(self):
+        debug_print('TracePlotFrame')
+        self.manual_t_range = False
+        nsel = self.trace_listbox.curselection()[0]
+        self.n_current_trace = nsel
+        self.reset_zoom()
+        self.refresh()
+        
+    def filter_trace_list(self):
+        """
+        Filter traces out of the trace list. Right now, you can filter by distance
+        or trace id contents.
+
+        """
+        debug_print('TracePlotFrame')
+        
+        # get the entered user values
+        id_str = self.trace_filter_id_entry.get()
+        distance1 = float(self.trace_filter_dist1_entry.get())
+        distance2 = float(self.trace_filter_dist2_entry.get())
+        
+        # if nothing changed, return.
+        if id_str == self.pref_id_filter_str and distance1 == self.pref_dist1_filter and distance2 == self.pref_dist2_filter: 
+            return
+        
+        # otherwise, select only the traces fitting the parameters
+        else:
+            try:
+                network_str,station_str,location_str,channel_str = id_str.lower().split(',')
+                self.st_subset = self.st.select(network=network_str,station=station_str,location=location_str,channel=channel_str)
+                
+                for tr in self.st_subset:
+                    deldist = tr.stats.station_data['deldist']
+                    if deldist < distance1 or deldist > distance2:
+                        self.st_subset.remove(tr)
+            except Exception as err:
+                print("Invalid string entry. Please try again (click ? for help)")
+                print(err)
+                return
+        
+        # refresh the trace listbox and stream, and set the current trace to 0
+        self.populate_trace_listbox()
+        self.n_current_trace = 0
+        self.refresh_st()
+        
+        return
+    
+    # this might be used in the future so I'll leave it for now
+    # def on_change_trace_order_press(self):
+        
+    #     if self.trace_sort_ascend:
+    #         self.trace_sort_ascend = False
+    #         self.trace_order_text = 'descend'
+    #     else:
+    #         self.trace_sort_ascend = True
+    #         self.trace_order_text = 'ascend'
+    #     self.trace_sort_order_button['text'] = 'Sorting by ('+self.trace_order_text+'): '
+    
+#%% POPUP WINDOW FUNCTIONS
+    
+    def plot_spectrogram(self):
+        debug_print('TracePlotFrame')
+        tr = self.tr_pref.copy()
+        tr.spectrogram()
+        return
+    
+    def plot_ppsd(self):
+        debug_print('TracePlotFrame')
+        tr = self.tr_pref
+        d = tr.data
+        Pxx, freqs = plt.psd(d,Fs=tr.stats.sampling_rate)
+        return
+    
+    def plot_record_section(self):
+        """
+        placeholder for future use
+
+        """
+        return
+        
+    def filter_help_popup(self):
+        """
+        Displays a simple help popup for filtering the trace list
+
+        """
+        debug_print('TracePlotFrame')
+        lines = ['Enter Unix-style, comma-separated strings to filter out certain traces. ',
+                 '* is a wildcard for one or more characters',
+                 '? is a wildcard for exactly one character',
+                 'bracketed [] characters match on any character inside the brackets',
+                 " ",
+                 'Format: \"NET,STA,LOC,CHA\"',
+                 'where each of the above comma-separated values represents a search string',
+                 'for the corresponding property.',
+                 ' ',
+                 'Example: \"*,*,*,H?[ew]\"',
+                 '\t- All networks, stations, and locations are kept',
+                 '\t- Channels whose first character is H, second character is anything,',
+                 '\t  and third character is either E or W are kept',
+                 ' ',
+                 'See documentation for obspy.core.stream.Stream.select for more info.']
+        
+        message_str = '\n'.join(lines)
+        popup('Station ID filtering',message_str)
+    
+#%% PLOT MANIPULATION FUNCTIONS
+    
+    def zoom_toggle(self):
+        debug_print('TracePlotFrame')
+        
+        # changing to auto t range
+        if self.manual_t_range:
+            self.reset_zoom()
+            
+        # changing to manual t range
+        else:
+            self.manual_t_range = True
+            self.zoom_toggle_button['text'] = 'Reset zoom'
+            self.zoom_status['text'] = 'Select t1'
+            
+        self.refresh()
+    
+    def reset_zoom(self):
+        debug_print('TracePlotFrame')
+        self.tf = -99999
+        self.t0 = 0
+        self.zoom_status['text'] = ''
+        self.manual_t_range = False
+        self.zoom_toggle_button['text'] = 'Change time range'
+    
+    
+    def on_canvas_click(self, event):
+        debug_print('TracePlotFrame')
+        # print(self.nclick,[event.xdata,event.ydata])
+        # print(event)
+        # if on manual zoom
+        if self.manual_t_range:
+            if event.inaxes is not None:
+                # print('click')
+                if self.nclick==1:
+                    self.t1 = event.xdata
+                    self.nclick += 1
+                    self.zoom_status['text'] = 'Select t2'
+                elif self.nclick==2:
+                    self.t2 = event.xdata
+                    trange = [self.t1,self.t2]
+                    trange.sort()
+                    # print('trange: ',trange)
+                    self.t0 = trange[0]
+                    self.tf = trange[1]
+                    self.nclick = 0
+                    self.zoom_status['text'] = 'Select t1'
+                    self.refresh()
+                
+            else:
+                print('clicked outside of axes bounds but inside plot window')
+    
+    def scroll(self,direction):
+        """
+        Scroll the plot window left or right
+
+        """
+        debug_print('TracePlotFrame')
+        #        initial +  (-1/1)  * scroll magnitude       * window width
+        t0_new = self.t0 + direction*(self.scroll_percent/100)*(self.tf-self.t0)
+        tf_new = self.tf + direction*(self.scroll_percent/100)*(self.tf-self.t0)
+        
+        # if trying to scroll too far left
+        if t0_new <= self.tmin:
+            t_shift = direction*(self.t0-self.tmin)
+        
+        # if new t0, tf are between tmin, tmax
+        elif t0_new > self.tmin and tf_new < self.tmax:
+            t_shift = direction * (self.scroll_percent/100)*(self.tf-self.t0)
+
+        # if trying to scroll too far right
+        elif tf_new >= self.tmax:
+            t_shift = direction*(self.tmax - self.tf)
+
+        self.t0 = self.t0 + t_shift
+        self.tf = self.tf + t_shift
+        self.refresh()
+    
+#%% MISCELLANEOUS FUNCTIONS
+
     def save_figure(self):
         debug_print('TracePlotFrame')
         Path('figures/').mkdir(exist_ok=True)
         fname = 'figures/'+'.'.join(self.fig_name_list)+'.pdf'
         self.fig.savefig(fname)
         
+    def get_stream_level_properties(self):
+        """
+        Gets all GUI fields and stores them in the object
+
+        """
         
-    def refresh_st(self):
-        debug_print('TracePlotFrame')
-        # print('refresh_st()')
-        # self.efs_pref = copy.deepcopy(self.efs)
-        # self.st_pref = self.st_subset.copy()
-        # this placement isn't ideal
-        # update plot_picks
+        # get fields
         self.pref_plot_picks = self.plot_picks_box.get()
-        
-        # self.st = self.efs_pref.to_obspy(keep_pkdata=True)
-        self.st_pref = self.st_subset.copy()
-        self.ntr = len(self.st_subset)
-        
-        self.efs_parent_dir_new = self.controller.frames[StartPage].efs_parent_dir
-        if self.efs_parent_dir_new != self.efs_parent_dir:
-            self.efs_parent_dir = self.efs_parent_dir_new
-            self.populate_file_listbox()
-            
-        # maybe only do this if preferences have changed
-        
-        ##### get current values #####
-        # update pref_demean
         pref_demean_str = self.demean_box.get()
+        self.pref_filter_type = self.filter_type_box.get()
+        self.f1_value = float(self.f1_entry.get())
+        self.f2_value = float(self.f2_entry.get())
+        self.f3_value = int(self.f3_entry.get())
+        
+        # get values from other frames
+        self.efs_parent_dir_new = self.controller.frames[StartPage].efs_parent_dir
+        # self.efs_parent_dir = self.controller.frames[StartPage].efs_parent_dir
+        
+        # quick processing
         if pref_demean_str=='None':
             self.pref_demean = 0
         elif pref_demean_str=='Demean':
             self.pref_demean = 1
         elif pref_demean_str=='Detrend':
             self.pref_demean = 2
+        return
+    
+    def get_trace_level_properties(self):
+        
+        return
+    
+        
+#%% REFRESH FUNCTIONS
+        
+    def refresh_st(self):
+        """
+        Loads the file if necessary, filters, updates some preferences, etc.
+        Obspy.Stream level operations
+
+        Calls refresh() at the end.
+        
+        self.st is the original Obspy stream loaded from file(s)
+        self.st_subset is the original Obspy stream minus traces filtered out with filter_trace_list()
+        self.st_pref is the st_subset with filtered signals
+        
+        """
+        debug_print('TracePlotFrame')
+        
+        # get and store properties
+        self.get_stream_level_properties()
+        
+        # store a few objects
+        self.st_pref = self.st_subset.copy()
+        self.ntr = len(self.st_subset)
+        
+        # if this is a new directory, handle it and populate file listbox. is this necessary/properly located?
+        if self.efs_parent_dir_new != self.efs_parent_dir:
+            self.efs_parent_dir = self.efs_parent_dir_new
+            self.populate_file_listbox()
         
         # update filter options
-        self.pref_filter_type = self.filter_type_box.get()
+        # self.pref_filter_type = self.filter_type_box.get()
         
         # get values, update labels and entry fields
         if self.pref_filter_type=='none':
@@ -1154,7 +1325,7 @@ class TracePlotFrame(tk.Frame):
             self.f3_entry['state'] = 'disabled'
             self.show_response_button['state'] = 'disabled'
         elif self.pref_filter_type=='highpass' or self.pref_filter_type=='lowpass':
-            self.pref_filter_freq = float(self.f1_entry.get())
+            self.pref_filter_freq = self.f1_value
             
             self.f2_entry['state'] = 'disabled'
             self.f3_entry['state'] = 'disabled'
@@ -1167,9 +1338,9 @@ class TracePlotFrame(tk.Frame):
             self.show_response_button['state'] = 'enabled'
 
         elif self.pref_filter_type=='bandpass':
-            self.pref_filter_bp_fmin = float(self.f1_entry.get())
-            self.pref_filter_bp_fmax = float(self.f2_entry.get())
-            self.pref_filter_bp_corners = int(self.f3_entry.get())
+            self.pref_filter_bp_fmin = self.f1_value
+            self.pref_filter_bp_fmax = self.f2_value
+            self.pref_filter_bp_corners = self.f3_value
             
             
             self.f1_label['text'] = 'Freq. min: '
@@ -1204,21 +1375,40 @@ class TracePlotFrame(tk.Frame):
         self.refresh()
     
     def refresh(self):
+        """
+        Refreshes non-stream specific things like plot features.
+        
+        Obspy.Trace level operations.
+
+        Returns
+        -------
+        None.
+
+        """
         debug_print('TracePlotFrame')
         
-        # print('refresh()')
-        self.ax.clear()
-        self.trace_listbox_label['text'] = str(self.n_current_trace+1)+" of "+str(self.ntr)+" traces"
-                
+        # if no traces, do nothing
         if self.ntr == 0: return
         
+        # clear the previous figure/axes
+        self.ax.clear()
+        
+        # update GUI objects
+        self.trace_listbox_label['text'] = str(self.n_current_trace+1)+" of "+str(self.ntr)+" traces"
+        
+        # load the trace and store some values
         tr = self.st_pref[self.n_current_trace]
-        tdif = tr.stats.pick_data['tdif']
-        tr_pref = tr.copy()
         
-        self.tr_pref = tr_pref
+        # make compatible with non-efs files
+        if hasattr(tr.stats.pick_data,'tdif'):
+            tdif = tr.stats.pick_data['tdif']
+        else:
+            tdif = 0
+        self.tr_pref = tr.copy()
         
-        self.f_nyquist = tr_pref.stats['sampling_rate']/2
+        # self.tr_pref = tr_pref
+        
+        self.f_nyquist = self.tr_pref.stats['sampling_rate']/2
         
         self.f1_entry['to'] = self.f_nyquist
         self.f2_entry['to'] = self.f_nyquist
@@ -1226,16 +1416,15 @@ class TracePlotFrame(tk.Frame):
         
         ### update trace-specific values
         # update preferences
-        self.pref_plot_picks = self.plot_picks_box.get()
         self.nclick = 0
         
         # time array relative to eq origin time
-        t = tr_pref.times() + tdif
+        t = self.tr_pref.times() + tdif
         self.tmin = min(t)
         self.tmax = max(t)
         pickn,pickt,pickq = [],[],[]
         if self.pref_plot_picks!='None':
-            pickn,pickt,pickq = get_picks(tr_pref)
+            pickn,pickt,pickq = get_picks(self.tr_pref)
             
             # only plot picks if there are picks
             if len(pickt)>0:
@@ -1280,7 +1469,7 @@ class TracePlotFrame(tk.Frame):
             
             
         
-        d = tr_pref.data
+        d = self.tr_pref.data
         self.ax.plot(t,d,c='k',zorder=1,linewidth=0.5,label="Trace")
         self.fig.tight_layout(pad=1.4)
         
@@ -1336,54 +1525,6 @@ class TracePlotFrame(tk.Frame):
         self.update()
         self.canvas.draw()
         
-    def on_click(self, event):
-        debug_print('TracePlotFrame')
-        # print(self.nclick,[event.xdata,event.ydata])
-        # print(event)
-        # if on manual zoom
-        if self.manual_t_range:
-            if event.inaxes is not None:
-                # print('click')
-                if self.nclick==1:
-                    self.t1 = event.xdata
-                    self.nclick += 1
-                    self.zoom_status['text'] = 'Select t2'
-                elif self.nclick==2:
-                    self.t2 = event.xdata
-                    trange = [self.t1,self.t2]
-                    trange.sort()
-                    # print('trange: ',trange)
-                    self.t0 = trange[0]
-                    self.tf = trange[1]
-                    self.nclick = 0
-                    self.zoom_status['text'] = 'Select t1'
-                    self.refresh()
-                
-            else:
-                print('clicked outside of axes bounds but inside plot window')
-    
-    def reset_zoom(self):
-        debug_print('TracePlotFrame')
-        self.tf = -99999
-        self.t0 = 0
-        self.zoom_status['text'] = ''
-        self.manual_t_range = False
-        self.zoom_toggle_button['text'] = 'Change time range'
-
-    def zoom_toggle(self):
-        debug_print('TracePlotFrame')
-        
-        # changing to auto t range
-        if self.manual_t_range:
-            self.reset_zoom()
-            
-        # changing to manual t range
-        else:
-            self.manual_t_range = True
-            self.zoom_toggle_button['text'] = 'Reset zoom'
-            self.zoom_status['text'] = 'Select t1'
-            
-        self.refresh()
 
 #%% Program starts here
 
@@ -1408,12 +1549,12 @@ frame_tpf.file_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_file_cha
 frame_tpf.trace_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_trace_change())
 
 # trace filtering
-frame_tpf.trace_filter_id_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_traces())
-frame_tpf.trace_filter_dist1_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_traces())
-frame_tpf.trace_filter_dist2_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_traces())
+frame_tpf.trace_filter_id_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_trace_list())
+frame_tpf.trace_filter_dist1_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_trace_list())
+frame_tpf.trace_filter_dist2_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_trace_list())
 
 # frame_tpf.canvas.bind()
-frame_tpf.canvas.callbacks.connect('button_press_event', frame_tpf.on_click)
+frame_tpf.canvas.callbacks.connect('button_press_event', frame_tpf.on_canvas_click)
 
 
 # stop script on window close
