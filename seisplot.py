@@ -975,7 +975,6 @@ class TracePlotFrame(tk.Frame):
     def increment_file(self):
         debug_print('TracePlotFrame')
         global n_current_file
-        # print('DEBUG: ',n_current_file,len(self.efs_files))
         if n_current_file < len(self.efs_files)-1:
             n_current_file += 1
             self.file_listbox.selection_clear(0,'end')
@@ -993,7 +992,6 @@ class TracePlotFrame(tk.Frame):
     
     def on_file_change(self):
         debug_print('TracePlotFrame')
-        # print('on_file_change()')
         global n_current_file
         
         self.efs_files = self.controller.frames[StartPage].efs_files
@@ -1267,8 +1265,8 @@ class TracePlotFrame(tk.Frame):
         self.f3_value = int(self.f3_entry.get())
         
         # get values from other frames
-        self.efs_parent_dir_new = self.controller.frames[StartPage].efs_parent_dir
-        # self.efs_parent_dir = self.controller.frames[StartPage].efs_parent_dir
+        # self.efs_parent_dir_new = self.controller.frames[StartPage].efs_parent_dir
+        self.efs_parent_dir = self.controller.frames[StartPage].efs_parent_dir
         
         # quick processing
         if pref_demean_str=='None':
@@ -1308,9 +1306,9 @@ class TracePlotFrame(tk.Frame):
         self.ntr = len(self.st_subset)
         
         # if this is a new directory, handle it and populate file listbox. is this necessary/properly located?
-        if self.efs_parent_dir_new != self.efs_parent_dir:
-            self.efs_parent_dir = self.efs_parent_dir_new
-            self.populate_file_listbox()
+        # if self.efs_parent_dir_new != self.efs_parent_dir:
+        #     self.efs_parent_dir = self.efs_parent_dir_new
+        #     self.populate_file_listbox()
         
         # update filter options
         # self.pref_filter_type = self.filter_type_box.get()
@@ -1352,7 +1350,6 @@ class TracePlotFrame(tk.Frame):
             self.show_response_button['state'] = 'enabled'
 
         ##### apply preferences #####
-        # self.st_pref = self.st.copy()
         # if self.pref_demean==0: # do nothing
         if self.pref_demean==1:
             self.st_pref.detrend('simple')
@@ -1364,10 +1361,12 @@ class TracePlotFrame(tk.Frame):
             self.st_pref.filter(self.pref_filter_type,freq=self.pref_filter_freq)
             self.filter_string = self.pref_filter_type + ", f="+str(self.pref_filter_freq)+" Hz"
             self.name_filter_string = self.pref_filter_type +str(self.pref_filter_freq)
+            
         elif self.pref_filter_type=='bandpass':
             self.st_pref.filter(self.pref_filter_type,freqmin=self.pref_filter_bp_fmin,freqmax=self.pref_filter_bp_fmax,corners=self.pref_filter_bp_corners)
             self.filter_string = self.pref_filter_type + " (fmin,fmax)=("+str(self.pref_filter_bp_fmin) + ","+str(self.pref_filter_bp_fmax)+") Hz, corners="+str(self.pref_filter_bp_corners)
             self.name_filter_string = self.pref_filter_type +str(self.pref_filter_bp_fmin) + "-"+str(self.pref_filter_bp_fmax)+"."+str(self.pref_filter_bp_corners)+'corners'
+        
         elif self.pref_filter_type=='none':
             self.filter_string = 'unfiltered'
             self.name_filter_string = 'unfiltered'
@@ -1393,35 +1392,33 @@ class TracePlotFrame(tk.Frame):
         # clear the previous figure/axes
         self.ax.clear()
         
-        # update GUI objects
-        self.trace_listbox_label['text'] = str(self.n_current_trace+1)+" of "+str(self.ntr)+" traces"
-        
-        # load the trace and store some values
+        # store some values
         tr = self.st_pref[self.n_current_trace]
+        self.tr_pref = tr.copy()
+        self.f_nyquist = self.tr_pref.stats['sampling_rate']/2
+        self.nclick = 0
         
-        # make compatible with non-efs files
+        # make tdif compatible with non-efs files
         if hasattr(tr.stats.pick_data,'tdif'):
             tdif = tr.stats.pick_data['tdif']
         else:
             tdif = 0
-        self.tr_pref = tr.copy()
         
-        # self.tr_pref = tr_pref
-        
-        self.f_nyquist = self.tr_pref.stats['sampling_rate']/2
-        
+        # update GUI objects
+        self.trace_listbox_label['text'] = str(self.n_current_trace+1)+" of "+str(self.ntr)+" traces"
         self.f1_entry['to'] = self.f_nyquist
         self.f2_entry['to'] = self.f_nyquist
         self.f3_entry['to'] = self.f_nyquist
         
         ### update trace-specific values
         # update preferences
-        self.nclick = 0
         
         # time array relative to eq origin time
         t = self.tr_pref.times() + tdif
         self.tmin = min(t)
         self.tmax = max(t)
+        
+        # this should be added as a plugin
         pickn,pickt,pickq = [],[],[]
         if self.pref_plot_picks!='None':
             pickn,pickt,pickq = get_picks(self.tr_pref)
