@@ -88,6 +88,30 @@ geostr = '1120x530'
 global CONFIG_FILENAME
 CONFIG_FILENAME = 'config.ini'
 
+def load_plugins():
+    import importlib
+    
+    # import plugins
+    
+    # pllist = [el for el in dir(plugins) if el[0] != '_']
+    
+    sys.path.append('plugins/')
+
+    
+    # for el in pllist:
+    #     globals()[el] = __import__('plugins', fromlist=[el])
+    
+    # [print(el) for el in os.listdir('plugins/') if Path('plugins/'+el).is_dir()]
+    for el in os.listdir('plugins/'):
+        if Path('plugins/' + el).is_dir() and el[0] != '_':
+            print(el)
+            A = __import__(el)
+            print(dir(A))
+            
+            B = A.__spec__
+            print(B)
+    return
+
 def str2bool(string):
     S = string.lower()
     if S=='true':
@@ -1528,6 +1552,7 @@ class TracePlotFrame(tk.Frame):
 #%% LOAD SETTINGS
 global config_debug_mode
 load_config()
+load_plugins()
 
 app = SeisPlot()
 frame_tpf = app.frames[TracePlotFrame]
