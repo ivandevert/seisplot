@@ -83,10 +83,19 @@ from scipy import signal
 LARGE_FONT= ("Verdana", 12)
 DEF_GEOMETRY = [530, 1120]
 DEF_CANVAS_GEOMETRY = [455, 845]
-geostr = '1120x530'
 
 global CONFIG_FILENAME
 CONFIG_FILENAME = 'config.ini'
+
+def get_geometry_string(geometry_list):
+    """
+    Returns formatted string for Tk geometry.
+    Ex: [600, 800] returns '800x600'
+
+    """
+    lw = str(len(str(geometry_list[1])))
+    lh = str(len(str(geometry_list[0])))
+    return str('%'+lw+'ix%'+lh+'i') % (geometry_list[1], geometry_list[0])
 
 def load_plugins():
     """
@@ -94,7 +103,11 @@ def load_plugins():
 
     """
     import importlib
-        
+    
+    global plugin_total_height
+    
+    plugin_total_height = 0
+    
     pth = slash(str(Path().resolve())) + 'plugins/'
     sys.path.append(pth)
     
@@ -105,6 +118,7 @@ def load_plugins():
             try:
                 globals()[el] = importlib.import_module(el+'.'+el, package=el)
                 plugins.append(el)
+                plugin_total_height += sys.modules['.'.join([el, el])].frame_height
                 print('Plugin ' + el + ' loaded successfully')
             except:
                 print("Error loading plugin " + el + ". Skipping.")
@@ -706,7 +720,7 @@ class TracePlotFrame(tk.Frame):
         self.scroll_percent = 10
         
         # GUI layout variables
-        box_width = 10
+        box_width = 6
         col_lb1_width = 12
         
         # initialize something? idk what this is for actually but the program breaks without it
@@ -739,13 +753,13 @@ class TracePlotFrame(tk.Frame):
         
         # grid parent frames
         navbar_frame.grid(column=0,row=0,columnspan=3,sticky='ew')
-        file_nav_frame.grid(column=0,row=1,rowspan=3,sticky='nw')
+        file_nav_frame.grid(column=0,row=1,rowspan=3,sticky='nws')
         self.canvas_frame.grid(column=1,row=1,sticky='nsew')
-        trace_nav_frame.grid(column=2,row=1,rowspan=3,sticky='ne')
+        trace_nav_frame.grid(column=2,row=1,rowspan=3,sticky='nes')
         canvas_nav_frame.grid(column=1,row=2,sticky='s')
         pref_frame.grid(column=1,row=3,sticky='s')
         self.next_frame_row = 4
-        self.rowspan = 3
+        self.plugin_colspan = 3
         
         #%% navigation frame
         frame_label = tk.Label(navbar_frame, text="Trace plot",font=LARGE_FONT)
@@ -987,8 +1001,7 @@ class TracePlotFrame(tk.Frame):
         Grid the plugins
 
         """
-        # self.next_frame_row = 4
-        # self.rowspan = 3
+        
         nplugins = len(plugins)
         
         self.plugin_frames = [[]] * nplugins
@@ -996,12 +1009,14 @@ class TracePlotFrame(tk.Frame):
         for ii, pl in enumerate(self.plugins):
             
             # initialize a frame and grid it
-            self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5)
-            self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5)
-            self.plugin_frames[ii].grid(column=0, row=self.next_frame_row, rowspan=self.rowspan, sticky='s')
+            self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5,borderwidth=5,relief='groove')
+            # self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5)
+            self.plugin_frames[ii].grid(column=0, row=self.next_frame_row, columnspan=self.plugin_colspan, sticky='ew')
 
             # send frame to plugin's on_grid() function to fill in
             sys.modules['.'.join([pl, pl])].on_grid(self, self.plugin_frames[ii])
+            
+            self.next_frame_row += 1
             
         return
     
@@ -1631,7 +1646,7 @@ class TracePlotFrame(tk.Frame):
         self.ax.annotate(textstr,xy=(1,1),xytext=(-5,-5),fontsize=8,xycoords='axes fraction', textcoords='offset points',bbox=props,horizontalalignment='right',verticalalignment='top',zorder=2000)
         
         self.plugins_on_refresh_end()
-        
+        self.fig.tight_layout(pad=1.4)
         # leave these in order. bad things happen otherwise
         self.update()
         self.canvas.draw()
@@ -1651,6 +1666,8 @@ global plugins
 
 load_config()
 plugins = load_plugins()
+
+app_geometry = np.add(DEF_GEOMETRY, [plugin_total_height, 0])
 
 app = SeisPlot()
 frame_tpf = app.frames[TracePlotFrame]
@@ -1681,8 +1698,9 @@ plugins_bind_events(frame_tpf)
 # stop script on window close
 app.protocol("WM_DELETE_WINDOW", app.quit_program)
 
-app.geometry('1120x530')
-app.minsize(width=DEF_GEOMETRY[1], height=DEF_GEOMETRY[0])
+print(app_geometry)
+app.geometry(get_geometry_string(app_geometry))
+app.minsize(width=app_geometry[1], height=app_geometry[0])
 
 app.mainloop()
 

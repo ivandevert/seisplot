@@ -9,6 +9,10 @@ from tkinter import ttk
 import numpy as np
 from matplotlib import pyplot as plt
 
+# height of the plugin's frame. Suggested: at least 45 per row of buttons, text, etc.
+frame_height = 45
+
+
 def on_grid(obj, frame):
     obj.sample_button = ttk.Button(frame, text="Sample button",command= lambda:print_test('This is a test button and function'))
     obj.sample_button.pack(side='left')
