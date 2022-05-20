@@ -89,28 +89,26 @@ global CONFIG_FILENAME
 CONFIG_FILENAME = 'config.ini'
 
 def load_plugins():
-    import importlib
-    
-    # import plugins
-    
-    # pllist = [el for el in dir(plugins) if el[0] != '_']
-    
-    sys.path.append('plugins/')
+    """
+    Load plugin modules and store them in globals().
 
+    """
+    import importlib
+        
+    pth = slash(str(Path().resolve())) + 'plugins/'
+    sys.path.append(pth)
     
-    # for el in pllist:
-    #     globals()[el] = __import__('plugins', fromlist=[el])
+    plugins = []
     
-    # [print(el) for el in os.listdir('plugins/') if Path('plugins/'+el).is_dir()]
-    for el in os.listdir('plugins/'):
-        if Path('plugins/' + el).is_dir() and el[0] != '_':
-            print(el)
-            A = __import__(el)
-            print(dir(A))
-            
-            B = A.__spec__
-            print(B)
-    return
+    for el in os.listdir(pth):
+        if Path(pth + el).is_dir() and el[0] != '_':
+            try:
+                globals()[el] = importlib.import_module(el+'.'+el, package=el)
+                plugins.append(el)
+                print('Plugin ' + el + ' loaded successfully')
+            except:
+                print("Error loading plugin " + el + ". Skipping.")
+    return plugins
 
 def str2bool(string):
     S = string.lower()
@@ -438,7 +436,7 @@ class SeisPlot(tk.Tk):
 
         debug_print('SeisPlot')
         
-        
+                
         tk.Tk.__init__(self, *args, **kwargs)
 
         tk.Tk.wm_title(self, "seisplot client")
@@ -514,39 +512,41 @@ class StartPage(tk.Frame):
         
         global n_current_file
         global config_default_filepath
+        global plugins
         
         n_current_file = -1
         self.controller = controller
         self.parent = parent
+        self.plugins = plugins
         self.efs_files = []
         
         self.efs_parent_dir = config_default_filepath
         
         tk.Frame.__init__(self,parent)
         
-        main_frame = tk.Frame(self)
-        main_frame.pack()
-        dir_select_label = tk.Label(main_frame, text="Directory selection", font=LARGE_FONT)
+        self.main_frame = tk.Frame(self)
+        self.main_frame.pack()
+        dir_select_label = tk.Label(self.main_frame, text="Directory selection", font=LARGE_FONT)
         
 
-        self.plot_button = ttk.Button(main_frame, text="Plot traces",command=lambda: self.controller.show_frame(TracePlotFrame) )
+        self.plot_button = ttk.Button(self.main_frame, text="Plot traces",command=lambda: self.controller.show_frame(TracePlotFrame) )
         
-        quit_button = ttk.Button(main_frame, text='Quit', command=lambda: self.controller.quit_program())
+        quit_button = ttk.Button(self.main_frame, text='Quit', command=lambda: self.controller.quit_program())
         
-        label_efs_parent_dir = tk.Label(main_frame, text="EFS parent directory: ", font=LARGE_FONT)
-        self.disp_efs_parent_dir = tk.Label(main_frame,text=self.efs_parent_dir)
-        self.file_count_label = tk.Label(main_frame, text='null')
-        button_change_efs_parent_dir = ttk.Button(main_frame,text='Change path',command=lambda: self.change_efs_parent_dir())
+        label_efs_parent_dir = tk.Label(self.main_frame, text="EFS parent directory: ", font=LARGE_FONT)
+        self.disp_efs_parent_dir = tk.Label(self.main_frame,text=self.efs_parent_dir)
+        self.file_count_label = tk.Label(self.main_frame, text='null')
+        button_change_efs_parent_dir = ttk.Button(self.main_frame,text='Change path',command=lambda: self.change_efs_parent_dir())
         
         
         dir_select_label.grid(row=0,columnspan=2)
-        tk.Label(main_frame,text='').grid(row=2)
+        tk.Label(self.main_frame,text='').grid(row=2)
         label_efs_parent_dir.grid(row=3,columnspan=2)
         self.disp_efs_parent_dir.grid(row=4,columnspan=2)
         self.file_count_label.grid(row=5, columnspan=2)
         self.plot_button.grid(row=6,column=0,sticky='e')
         button_change_efs_parent_dir.grid(row=6,column=1,sticky='w')
-        tk.Label(main_frame,text='').grid(row=7)
+        tk.Label(self.main_frame,text='').grid(row=7)
         quit_button.grid(row=8,columnspan=2)
         
         self.check_dir()
@@ -667,9 +667,10 @@ class TracePlotFrame(tk.Frame):
         self.controller = controller
         self.parent = parent
         
-        # get the files list and parent directory
+        # get the variables from parent frame
         self.efs_files = self.controller.frames[StartPage].efs_files
         self.efs_parent_dir = self.controller.frames[StartPage].efs_parent_dir
+        self.plugins = self.controller.frames[StartPage].plugins
                 
         self.NCOL = 14
                 
@@ -713,7 +714,7 @@ class TracePlotFrame(tk.Frame):
         
 #%% GUI Layout
         """
-        The GUI is designed to have a single "parent parent" frame (main_frame), populated 
+        The GUI is designed to have a single "parent parent" frame (self.main_frame), populated 
         with several gridded parent frames (labelled below), each with their own children and 
         layout. An exception is the canvas_frame, which is a tk.Canvas object and
         doesn't behave exactly the same.
@@ -724,17 +725,17 @@ class TracePlotFrame(tk.Frame):
         """
         
         # "parent parent" frame
-        main_frame = tk.Frame(self)
-        main_frame.grid(row=0,column=0, sticky='nsew')
+        self.main_frame = tk.Frame(self)
+        self.main_frame.grid(row=0,column=0, sticky='nsew')
         
         #%% parent frames
-        navbar_frame = tk.Frame(main_frame,padx=5,pady=5,borderwidth=5,relief='groove')
-        file_nav_frame = tk.Frame(main_frame,padx=5,pady=5)
-        # self.canvas_frame = tk.Frame(main_frame,padx=5,pady=5,borderwidth=2,relief='groove')
-        self.canvas_frame = tk.Canvas(main_frame,borderwidth=2,relief='groove')
-        trace_nav_frame = tk.Frame(main_frame,padx=5,pady=5)
-        canvas_nav_frame = tk.Frame(main_frame,padx=5,pady=5)
-        pref_frame = tk.Frame(main_frame,padx=5,pady=5,borderwidth=1,relief='groove')
+        navbar_frame = tk.Frame(self.main_frame,padx=5,pady=5,borderwidth=5,relief='groove')
+        file_nav_frame = tk.Frame(self.main_frame,padx=5,pady=5)
+        # self.canvas_frame = tk.Frame(self.main_frame,padx=5,pady=5,borderwidth=2,relief='groove')
+        self.canvas_frame = tk.Canvas(self.main_frame,borderwidth=2,relief='groove')
+        trace_nav_frame = tk.Frame(self.main_frame,padx=5,pady=5)
+        canvas_nav_frame = tk.Frame(self.main_frame,padx=5,pady=5)
+        pref_frame = tk.Frame(self.main_frame,padx=5,pady=5,borderwidth=1,relief='groove')
         
         # grid parent frames
         navbar_frame.grid(column=0,row=0,columnspan=3,sticky='ew')
@@ -743,6 +744,8 @@ class TracePlotFrame(tk.Frame):
         trace_nav_frame.grid(column=2,row=1,rowspan=3,sticky='ne')
         canvas_nav_frame.grid(column=1,row=2,sticky='s')
         pref_frame.grid(column=1,row=3,sticky='s')
+        self.next_frame_row = 4
+        self.rowspan = 3
         
         #%% navigation frame
         frame_label = tk.Label(navbar_frame, text="Trace plot",font=LARGE_FONT)
@@ -789,7 +792,8 @@ class TracePlotFrame(tk.Frame):
         ### end file nav frame
         
         #%% canvas frame
-        self.fig = Figure(dpi=100,tight_layout=True, figsize=np.flip(DEF_CANVAS_GEOMETRY)/100)
+        self.fig = Figure(dpi=100, tight_layout=True, figsize=np.flip(DEF_CANVAS_GEOMETRY)/100)
+        # self.fig = Figure(dpi=100, figsize=np.flip(DEF_CANVAS_GEOMETRY)/100)
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.canvas_frame)
         
@@ -946,23 +950,26 @@ class TracePlotFrame(tk.Frame):
         self.plot_picks_box.grid(column=1,row=2,sticky='w')
         self.plot_picks_box.set(self.pref_plot_picks)
         
+        self.plugins_grid()
+        
         #%% these lines allow canvas_frame to change shape on window resize
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(1, weight=1)
-        main_frame.columnconfigure(1, weight=1)
+        self.main_frame.rowconfigure(1, weight=1)
+        self.main_frame.columnconfigure(1, weight=1)
         # self.canvas.draw()
         
         # end plot picks row
         #%% end pref frame
-        
-        
         
 #%%
         
         self.n_current_trace = 0
         self.t0 = 0
         self.tf = -99999
+        
+        # let the plugins initialize
+        self.plugins_on_traceplotframe_init()
         
         # if n_current_file isn't a -1 flag, 
         if n_current_file >= 0:
@@ -972,6 +979,31 @@ class TracePlotFrame(tk.Frame):
         # print(n_current_file)
         # if n_current_file >= 0:
         #     self.on_file_change()
+    
+#%% PLUGIN HANDLERS
+    
+    def plugins_grid(self):
+        """
+        Grid the plugins
+
+        """
+        # self.next_frame_row = 4
+        # self.rowspan = 3
+        nplugins = len(plugins)
+        
+        self.plugin_frames = [[]] * nplugins
+        
+        for ii, pl in enumerate(self.plugins):
+            
+            # initialize a frame and grid it
+            self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5)
+            self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5)
+            self.plugin_frames[ii].grid(column=0, row=self.next_frame_row, rowspan=self.rowspan, sticky='s')
+
+            # send frame to plugin's on_grid() function to fill in
+            sys.modules['.'.join([pl, pl])].on_grid(self, self.plugin_frames[ii])
+            
+        return
     
 #%% FILE NAVIGATION FUNCTIONS
     
@@ -1265,6 +1297,55 @@ class TracePlotFrame(tk.Frame):
         self.t0 = self.t0 + t_shift
         self.tf = self.tf + t_shift
         self.refresh()
+
+#%% PLUGIN HANDLERS
+    
+    def plugins_on_traceplotframe_init(self):
+        """
+        This runs when TracePlotFrame is initialized
+
+        """
+        for el in self.plugins:
+            sys.modules['.'.join([el, el])].on_traceplotframe_init(self)
+
+        return
+    
+    def plugins_on_refresh_st_beginning(self):
+        """
+        This runs at the beginning of refresh_st()
+
+        """
+        for el in self.plugins:
+            sys.modules['.'.join([el, el])].on_refresh_st_beginning(self)
+        return
+    
+    def plugins_on_refresh_st_end(self):
+        """
+        This runs at the end of refresh_st()
+
+        """
+        for el in self.plugins:
+            sys.modules['.'.join([el, el])].on_refresh_st_end(self)
+        return
+    
+    def plugins_on_refresh_beginning(self):
+        """
+        This runs at the beginning of refresh()
+
+        """
+        for el in self.plugins:
+            sys.modules['.'.join([el, el])].on_refresh_beginning(self)
+        return
+    
+    def plugins_on_refresh_end(self):
+        """
+        This runs at the end of refresh()
+
+        """
+        for el in self.plugins:
+            sys.modules['.'.join([el, el])].on_refresh_end(self)
+        return
+    
     
 #%% MISCELLANEOUS FUNCTIONS
 
@@ -1324,6 +1405,7 @@ class TracePlotFrame(tk.Frame):
         
         # get and store properties
         self.get_stream_level_properties()
+        self.plugins_on_refresh_st_beginning()
         
         # store a few objects
         self.st_pref = self.st_subset.copy()
@@ -1394,7 +1476,9 @@ class TracePlotFrame(tk.Frame):
         elif self.pref_filter_type=='none':
             self.filter_string = 'unfiltered'
             self.name_filter_string = 'unfiltered'
-            
+        
+        self.plugins_on_refresh_st_end()
+        
         self.refresh()
     
     def refresh(self):
@@ -1441,6 +1525,10 @@ class TracePlotFrame(tk.Frame):
         t = self.tr_pref.times() + tdif
         self.tmin = min(t)
         self.tmax = max(t)
+        
+        # done updating things
+        
+        self.plugins_on_refresh_beginning()
         
         # this should be added as a plugin
         pickn,pickt,pickq = [],[],[]
@@ -1505,9 +1593,9 @@ class TracePlotFrame(tk.Frame):
         dwin = d[np.logical_and((t>=self.t0+time_buffer),(t<=self.tf-time_buffer))]
         
         d_mean = np.nanmean(dwin)
-        dmax = max(abs(dwin-d_mean))
+        self.dmax = max(abs(dwin-d_mean))
         
-        ylimits = (d_mean + np.array([-1,1],dtype=np.float64) * dmax * 1.2)
+        ylimits = (d_mean + np.array([-1,1],dtype=np.float64) * self.dmax * 1.2)
         self.ax.set_ylim(ylimits)
         
         xlimits = [self.t0,self.tf]
@@ -1542,17 +1630,27 @@ class TracePlotFrame(tk.Frame):
         props = dict(boxstyle='round', facecolor='white', alpha=0.9)
         self.ax.annotate(textstr,xy=(1,1),xytext=(-5,-5),fontsize=8,xycoords='axes fraction', textcoords='offset points',bbox=props,horizontalalignment='right',verticalalignment='top',zorder=2000)
         
+        self.plugins_on_refresh_end()
+        
         # leave these in order. bad things happen otherwise
         self.update()
         self.canvas.draw()
         
+def plugins_bind_events(frame):
+    global plugins
+    
+    for el in plugins:
+        sys.modules['.'.join([el, el])].on_bind_init(frame)
+    return
 
 #%% Program starts here
 
 #%% LOAD SETTINGS
 global config_debug_mode
+global plugins
+
 load_config()
-load_plugins()
+plugins = load_plugins()
 
 app = SeisPlot()
 frame_tpf = app.frames[TracePlotFrame]
@@ -1578,6 +1676,7 @@ frame_tpf.trace_filter_dist2_entry.bind('<FocusOut>', lambda _: frame_tpf.filter
 # frame_tpf.canvas.bind()
 frame_tpf.canvas.callbacks.connect('button_press_event', frame_tpf.on_canvas_click)
 
+plugins_bind_events(frame_tpf)
 
 # stop script on window close
 app.protocol("WM_DELETE_WINDOW", app.quit_program)
