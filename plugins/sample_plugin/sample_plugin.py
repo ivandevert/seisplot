@@ -7,7 +7,7 @@ Created on Wed May 18 16:29:23 2022
 """
 from tkinter import ttk
 import numpy as np
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 
 # height of the plugin's frame. Suggested: at least 45 per row of buttons, text, etc.
 frame_height = 45
