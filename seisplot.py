@@ -18,19 +18,16 @@ TO DO:
     add resampling option
     add error logging
     make yaxis labels constant width
-    redo startpage logic/flow
     add plot settings bar
-    add record section plot button
     filter out noisy spectrograms (seismograms?)
-    spectrogram colorbar
     absolute vs relative time
-    add ability for custom functions
-    something is wrong with initializing start and end times
     save config info on exit
     organize functions in the TracePlotFrame class
     
-    bug: when the parent efs folder doesn't exist, the plot is not sized correctly
+    DPI is now hard coded to fix a bug with the plot not sizing correctly on 
+    start (temp fix). A better solution should be implemented.
     
+    add except Exception as err: print(err) to plugin functions
 
 """
 import tkinter as tk
@@ -38,6 +35,7 @@ from tkinter import ttk, Grid
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 
 # efspy_module_parent_dir = "/Users/ivandevert/prog/efspy/resources/"
 
@@ -66,7 +64,7 @@ from pathlib import Path
 # from datetime import date
 # from datetime import datetime
 # import timeit
-# import warnings
+import warnings
 import copy
 from tkinter import filedialog
 import inspect
@@ -84,8 +82,28 @@ LARGE_FONT= ("Verdana", 12)
 DEF_GEOMETRY = [530, 1120]
 DEF_CANVAS_GEOMETRY = [455, 845]
 
+
+
 global CONFIG_FILENAME
 CONFIG_FILENAME = 'config.ini'
+
+global FIGNUM_SPECTROGRAM
+global FIGNUM_PSD
+global FIGNUM_RESPONSE
+global FIGNUM_RECORD_SECTION
+
+FIGNUM_SPECTROGRAM = 10
+FIGNUM_PSD = 11
+FIGNUM_RESPONSE = 12
+FIGNUM_RECORD_SECTION = 13
+
+def searchunsorted(A, v):
+    # A is the array to search
+    # v is the array to match into A
+    
+    sort = np.argsort(A)
+    rank = np.searchsorted(A, v, sorter=sort)
+    return sort[rank]
 
 def get_geometry_string(geometry_list):
     """
@@ -100,14 +118,17 @@ def get_geometry_string(geometry_list):
 def load_plugins():
     """
     Load plugin modules and store them in globals().
+    
+    This could be rewritten to be less work-aroundy
 
     """
     import importlib
     
+    # store the heights of all plugins so window can be sized correctly
     global plugin_total_height
-    
     plugin_total_height = 0
     
+    # plugins path is just in the plugins/ subdirectory, add to system path
     pth = slash(str(Path().resolve())) + 'plugins/'
     sys.path.append(pth)
     
@@ -125,6 +146,10 @@ def load_plugins():
     return plugins
 
 def str2bool(string):
+    """
+    Turns a string 'True' or 'False' into a boolean True or False. Case insensitive.
+
+    """
     S = string.lower()
     if S=='true':
         return True
@@ -135,12 +160,8 @@ def str2bool(string):
 
 def init_config_file():
     """
-    Generates a configuration file. This will only be run once, or when
-    config.ini does not exist in the same directory.
-
-    Returns
-    -------
-    None.
+    Generates a configuration file. This will only be run when config.ini does 
+    not exist in the same directory.
 
     """
     debug_print('main')
@@ -159,10 +180,6 @@ def load_config():
     """
     Loads configuration settings from the configuration file. This is only used
     once per script execution.
-
-    Returns
-    -------
-    None.
 
     """
     try: 
@@ -395,6 +412,10 @@ def popup(title,message_str):
     b.grid(row=1, column=0)
     
 def popup_response(frame):
+    """
+    Plot the response of the filter. This should maybe be a function in TPF
+
+    """
     
     debug_print('main')
     tp = frame.pref_filter_type
@@ -419,17 +440,14 @@ def popup_response(frame):
 
     b, a = signal.iirfilter(corners,F,btype=btype,ftype='butter')
     w, h = signal.freqz(b,a,fs=f_nyquist*2,worN=512)
-    
-    # print(F)
-    
-    # signal.freqz(b,a,plot=lambda w, h:plt.plot(w, np.abs(h)))
-    
-    fig = plt.figure()
+        
+    fig = plt.figure(frame.fignum_response)
+    plt.clf()
     ax = fig.add_subplot(111)
     ax.plot(w, 20* np.log10(np.abs(h)))
     ax.set_title('Butterworth ' + tp + ' frequency response')
-    ax.set_xlabel('Frequency [Hz]')
-    ax.set_ylabel('Amplitude [dB]')
+    ax.set_xlabel('Frequency (Hz)')
+    ax.set_ylabel('Amplitude (dB)')
     # ax.axis((0.01, f_nyquist*10, -100, 10))
     ax.grid(which='both', axis='both')
     plt.show()
@@ -447,6 +465,11 @@ class SeisPlot(tk.Tk):
         """
         global filepath
         global n_current_file
+        
+        global FIGNUM_SPECTROGRAM
+        global FIGNUM_PSD
+        global FIGNUM_RESPONSE
+        global FIGNUM_RECORD_SECTION
 
         debug_print('SeisPlot')
         
@@ -471,7 +494,8 @@ class SeisPlot(tk.Tk):
             self.frames[F] = frame
 
             frame.grid(row=0, column=0, sticky="nsew")
-
+            
+            
         self.show_frame(StartPage)
 
     def show_frame(self, cont):
@@ -508,6 +532,10 @@ class SeisPlot(tk.Tk):
 
         """
         debug_print('SeisPlot')
+        plt.close(FIGNUM_SPECTROGRAM)
+        plt.close(FIGNUM_PSD)
+        plt.close(FIGNUM_RESPONSE)
+        plt.close(FIGNUM_RECORD_SECTION)
         self.destroy()
         self.quit()
 
@@ -670,12 +698,26 @@ class TracePlotFrame(tk.Frame):
         """
         Initialize the TracePlotFrame frame
         
+        The GUI is designed to have a single "parent parent" frame (self.main_frame), populated 
+        with several gridded parent frames (labelled below), each with their own children and 
+        layout. An exception is the canvas_frame, which is a tk.Canvas object and
+        doesn't behave exactly the same.
+        
+        See https://tkdocs.com/tutorial/grid.html for info on grid and pack functions.        
+        
+        Also see the GUI layout figure in the /docs/ folder
+        
         """
         
         debug_print('TracePlotFrame')
         global n_current_file
         global config_p_wave_color
         global config_s_wave_color
+        
+        global FIGNUM_SPECTROGRAM
+        global FIGNUM_PSD
+        global FIGNUM_RESPONSE
+        global FIGNUM_RECORD_SECTION
         
         # store controller/parent in object so they can be used outside init
         self.controller = controller
@@ -701,6 +743,7 @@ class TracePlotFrame(tk.Frame):
         self.pref_id_filter_str = '*,*,*,*'
         self.pref_dist1_filter = 0
         self.pref_dist2_filter = 99999
+        self.pref_trace_snr = 0
         
         self.pref_plot_picks = 'Real'       # T/F plot picks
         
@@ -718,6 +761,16 @@ class TracePlotFrame(tk.Frame):
         
         ### program constants that really don't need to be changed, but I guess they could be
         self.scroll_percent = 10
+        self.title_size = 8
+        self.axes_label_size = 8
+        self.axes_ticklabel_size = 6
+        self.infobox_text_size = 6
+        
+        # set default figure numbers
+        self.fignum_spectrogram = FIGNUM_SPECTROGRAM
+        self.fignum_psd = FIGNUM_PSD
+        self.fignum_response = FIGNUM_RESPONSE
+        self.fignum_record_section = FIGNUM_RECORD_SECTION
         
         # GUI layout variables
         box_width = 6
@@ -727,16 +780,6 @@ class TracePlotFrame(tk.Frame):
         tk.Frame.__init__(self,parent)
         
 #%% GUI Layout
-        """
-        The GUI is designed to have a single "parent parent" frame (self.main_frame), populated 
-        with several gridded parent frames (labelled below), each with their own children and 
-        layout. An exception is the canvas_frame, which is a tk.Canvas object and
-        doesn't behave exactly the same.
-        
-        See https://tkdocs.com/tutorial/grid.html for info on grid and pack functions.        
-        
-        Also see the GUI layout figure in the /docs/ folder
-        """
         
         # "parent parent" frame
         self.main_frame = tk.Frame(self)
@@ -772,10 +815,12 @@ class TracePlotFrame(tk.Frame):
         
         spectrogram_button = ttk.Button(navbar_frame,text='Plot spectrogram',command=lambda: self.plot_spectrogram())
         ppsd_button = ttk.Button(navbar_frame,text='Plot PSD',command=lambda: self.plot_ppsd())
+        record_section_button = ttk.Button(navbar_frame, text='Plot record section', command=lambda: self.plot_record_section())
         
         tk.Label(navbar_frame,text=' ',width=10).pack(side='right')
         spectrogram_button.pack(side='right')
         ppsd_button.pack(side='right')
+        record_section_button.pack(side='left')
         ### end navigation frame
         
         #%% file nav frame
@@ -793,7 +838,7 @@ class TracePlotFrame(tk.Frame):
         
         file_listbox_frame = tk.Frame(file_nav_frame)
         file_listbox_frame.grid(row=2,sticky='ns')
-        self.file_listbox = tk.Listbox(file_listbox_frame,height=19,exportselection=False)
+        self.file_listbox = tk.Listbox(file_listbox_frame,height=23,exportselection=False)
         self.file_listbox.pack(side='left',fill='both')
         file_scrollbar = tk.Scrollbar(file_listbox_frame)
         file_scrollbar.pack(side='right',fill='both')
@@ -805,16 +850,19 @@ class TracePlotFrame(tk.Frame):
         self.file_listbox_label.grid(row=3,sticky='n')
         ### end file nav frame
         
-        #%% canvas frame
-        self.fig = Figure(dpi=100, tight_layout=True, figsize=np.flip(DEF_CANVAS_GEOMETRY)/100)
-        # self.fig = Figure(dpi=100, figsize=np.flip(DEF_CANVAS_GEOMETRY)/100)
-        self.ax = self.fig.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.canvas_frame)
         
+        
+        
+        #%% canvas frame
+        # old
+        self.fig = Figure( figsize=np.flip(DEF_CANVAS_GEOMETRY)/75, dpi=75, frameon=False, layout='tight')
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.canvas_frame)
         self.canvas_widget = self.canvas.get_tk_widget()
-        self.canvas_widget.pack(fill='both',expand=True)
-        self.canvas_frame.itemconfigure(self.canvas, width=DEF_CANVAS_GEOMETRY[1], height=DEF_CANVAS_GEOMETRY[0])
-        self.canvas_frame.config(width=DEF_CANVAS_GEOMETRY[1], height=DEF_CANVAS_GEOMETRY[0])
+        self.canvas_widget.grid(row=0, column=0, sticky='nsew')
+        self.canvas_frame.rowconfigure(0, weight=10)
+        self.canvas_frame.columnconfigure(0, weight=10)
+        # self.canvas_frame.config(width=DEF_CANVAS_GEOMETRY[1], height=DEF_CANVAS_GEOMETRY[0])
+        # self.canvas_frame.itemconfigure(self.canvas, width=DEF_CANVAS_GEOMETRY[1], height=DEF_CANVAS_GEOMETRY[0])
         ### end canvas frame
         
         #%% canvas navigation frame
@@ -850,7 +898,7 @@ class TracePlotFrame(tk.Frame):
         
         trace_listbox_frame = tk.Frame(trace_nav_frame)
         trace_listbox_frame.grid(row=2,sticky='n')
-        self.trace_listbox = tk.Listbox(trace_listbox_frame,height=19,exportselection=False)
+        self.trace_listbox = tk.Listbox(trace_listbox_frame,height=17,exportselection=False)
         self.trace_listbox.pack(side='left',fill='both')
         trace_scrollbar = tk.Scrollbar(trace_listbox_frame)
         trace_scrollbar.pack(side='right',fill='both')
@@ -868,29 +916,34 @@ class TracePlotFrame(tk.Frame):
         trace_filter_id_label = tk.Label(trace_filter_frame,text='ID: ',anchor='w')
         trace_filter_distance_label = tk.Label(trace_filter_frame,text='Distance (km): ',anchor='w')
         trace_filter_to_label = tk.Label(trace_filter_frame,text='to',width=1)
+        trace_snr_filter_label = tk.Label(trace_filter_frame, text='Minimum SNR: ', anchor='w')
         
         component_var = tk.StringVar()
         dist1_var = tk.StringVar()
         dist2_var = tk.StringVar()
+        snr_var = tk.StringVar()
         self.trace_filter_id_entry = ttk.Entry(trace_filter_frame,textvariable=component_var,width=8)
         self.trace_filter_dist1_entry = ttk.Entry(trace_filter_frame,textvariable=dist1_var,width=2)
         self.trace_filter_dist2_entry = ttk.Entry(trace_filter_frame,textvariable=dist2_var,width=5)
-        
         self.trace_filter_id_help_button = ttk.Button(trace_filter_frame,text='?',width=0.5,command=lambda: self.filter_help_popup())
+        self.trace_snr_filter_entry = ttk.Entry(trace_filter_frame, textvariable=snr_var, width=3)
         
         trace_filter_frame_label.grid(row=0,column=0,columnspan=4,sticky='w')
         trace_filter_id_label.grid(row=1,column=0,sticky='w')
         trace_filter_distance_label.grid(row=2,column=0,sticky='w')
         trace_filter_to_label.grid(row=2,column=2)
+        trace_snr_filter_label.grid(row=3, column=0, sticky='w')
         
         self.trace_filter_id_entry.grid(row=1,column=1,columnspan=2,sticky='w')
         self.trace_filter_id_help_button.grid(row=1,column=3,sticky='e')
         self.trace_filter_dist1_entry.grid(row=2,column=1)
         self.trace_filter_dist2_entry.grid(row=2,column=3)
+        self.trace_snr_filter_entry.grid(row=3, column=1)
         
         self.trace_filter_id_entry.insert(0,self.pref_id_filter_str)
         self.trace_filter_dist1_entry.insert(0,str(self.pref_dist1_filter))
         self.trace_filter_dist2_entry.insert(0,str(self.pref_dist2_filter))
+        self.trace_snr_filter_entry.insert(0, str(self.pref_trace_snr))
         # end trace filtering
         
         
@@ -1008,15 +1061,18 @@ class TracePlotFrame(tk.Frame):
         
         for ii, pl in enumerate(self.plugins):
             
-            # initialize a frame and grid it
-            self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5,borderwidth=5,relief='groove')
-            # self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5)
-            self.plugin_frames[ii].grid(column=0, row=self.next_frame_row, columnspan=self.plugin_colspan, sticky='ew')
-
-            # send frame to plugin's on_grid() function to fill in
-            sys.modules['.'.join([pl, pl])].on_grid(self, self.plugin_frames[ii])
-            
-            self.next_frame_row += 1
+            try:
+                # initialize a frame and grid it
+                self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5,borderwidth=5,relief='groove')
+                # self.plugin_frames[ii] = tk.Frame(self.main_frame,padx=5,pady=5)
+                self.plugin_frames[ii].grid(column=0, row=self.next_frame_row, columnspan=self.plugin_colspan, sticky='ew')
+    
+                # send frame to plugin's on_grid() function to fill in
+                sys.modules['.'.join([pl, pl])].on_grid(self, self.plugin_frames[ii])
+                
+                self.next_frame_row += 1
+            except:
+                warnings.warn("Problem gridding plugin " + str(pl) + ". Skipping.")
             
         return
     
@@ -1044,6 +1100,10 @@ class TracePlotFrame(tk.Frame):
         self.on_file_change()
     
     def increment_file(self):
+        """
+        Increment n_current_file and change accordingly
+
+        """
         debug_print('TracePlotFrame')
         global n_current_file
         if n_current_file < len(self.efs_files)-1:
@@ -1053,6 +1113,10 @@ class TracePlotFrame(tk.Frame):
             self.on_file_change()
     
     def decrement_file(self):
+        """
+        Decrement n_current_file and change accordingly
+
+        """
         debug_print('TracePlotFrame')
         global n_current_file
         if n_current_file > 0:
@@ -1078,30 +1142,37 @@ class TracePlotFrame(tk.Frame):
         self.file_listbox_label['text'] = str(n_current_file+1)+" of "+str(len(self.efs_files))+" files"
         
         self.refresh_st()
-        self.populate_trace_listbox()
+        self.populate_trace_listbox(self.st_pref_subset)
     
     def load_file(self):
         debug_print('TracePlotFrame')
         global n_current_file
         
-        # this will soon be an issue
+        # this will soon be an issue (why?)
         self.filepath = self.efs_files[n_current_file]
         # print('ncurr: ',n_current_file)
         self.efs = EFS(self.filepath,np.float32,np.int32)
         self.efs_pref = copy.deepcopy(self.efs)
         
         self.st = self.efs_pref.to_obspy(keep_pkdata=True)
+        self.st.sort()
         self.st_subset = self.st.copy()
+        self.st_pref = self.st_subset.copy()
+        self.st_pref_subset = self.st_pref.copy()
+        self.tr_show_bool = np.ones(len(self.st), dtype=bool)
+        self.tr_ids_order = [el.get_id() for el in self.st.traces]
+        if len(self.tr_ids_order) != len(set(self.tr_ids_order)): raise ValueError("Not all EFS ids unique")
+        
         
 #%% TRACE NAVIGATION FUNCTIONS
     
-    def populate_trace_listbox(self):
+    def populate_trace_listbox(self, st):
         """
         Populates the trace listbox with traces in the st_subset Stream object.
 
         """
         debug_print('TracePlotFrame')
-        trace_ids = [str(el).split('|')[0].strip() for el in self.st_subset.traces]
+        trace_ids = [str(el).split('|')[0].strip() for el in st.traces]
         self.ntr = len(trace_ids)
         self.trace_listbox.delete(0,'end')
         
@@ -1111,6 +1182,7 @@ class TracePlotFrame(tk.Frame):
         else:
             self.trace_listbox.insert('end','No traces available')
         self.trace_listbox.select_set(0)
+        # self.trace_listbox.select_set(self.n_current_trace)
         
     def increment_trace(self):
         debug_print('TracePlotFrame')
@@ -1137,7 +1209,32 @@ class TracePlotFrame(tk.Frame):
         self.n_current_trace = nsel
         self.reset_zoom()
         self.refresh()
+    
+    # might use modified version of this in future (not working now)
+    # def order_traces(self, st):
+    #     tr_ids = [el.get_id() for el in st.traces]
+    #     ids_ordered = searchunsorted(self.tr_ids_order, tr_ids)
+    #     st_ordered = st.select(id=ids_ordered)
+    #     return st_ordered
+    
+    def on_distance_or_id_filter_change(self):
+        debug_print('TracePlotFrame')
         
+        snr = float(self.trace_snr_filter_entry.get())
+        # print("SNR----------->: ", snr)
+        
+        self.filter_trace_list()
+                        
+        # refresh the trace listbox and stream, and set the current trace to 0
+        # if snr option is set, skip populate_trace_listbox() (because it will be called later)
+        if snr < 0.0001:
+            self.populate_trace_listbox(self.st_subset)
+        # self.n_current_trace = 0
+        self.on_trace_change()
+        self.refresh_st()
+        
+        return
+    
     def filter_trace_list(self):
         """
         Filter traces out of the trace list. Right now, you can filter by distance
@@ -1150,14 +1247,22 @@ class TracePlotFrame(tk.Frame):
         id_str = self.trace_filter_id_entry.get()
         distance1 = float(self.trace_filter_dist1_entry.get())
         distance2 = float(self.trace_filter_dist2_entry.get())
+        # snr = float(self.trace_snr_filter_entry.get())
+        
+        # self.tr_show_bool
         
         # if nothing changed, return.
         if id_str == self.pref_id_filter_str and distance1 == self.pref_dist1_filter and distance2 == self.pref_dist2_filter: 
+            print('unchanged')
             return
         
         # otherwise, select only the traces fitting the parameters
         else:
             try:
+                self.pref_id_filter_str = id_str
+                self.pref_dist1_filter = distance1
+                self.pref_dist2_filter = distance2
+                
                 network_str,station_str,location_str,channel_str = id_str.lower().split(',')
                 self.st_subset = self.st.select(network=network_str,station=station_str,location=location_str,channel=channel_str)
                 
@@ -1165,18 +1270,79 @@ class TracePlotFrame(tk.Frame):
                     deldist = tr.stats.station_data['deldist']
                     if deldist < distance1 or deldist > distance2:
                         self.st_subset.remove(tr)
+            
+                        
+                    
             except Exception as err:
                 print("Invalid string entry. Please try again (click ? for help)")
                 print(err)
                 return
         
-        # refresh the trace listbox and stream, and set the current trace to 0
-        self.populate_trace_listbox()
-        self.n_current_trace = 0
-        self.refresh_st()
         
+        # sort traces back in order
+        self.st_subset.sort()   
+        self.ntr = len(self.st_subset)
+        self.n_current_trace = 0
         return
     
+    def on_snr_filter_change(self):
+        debug_print('TracePlotFrame')
+        
+        self.filter_trace_list_snr()
+        # self.n_current_trace = 0
+        self.populate_trace_listbox(self.st_pref_subset)
+        self.refresh_st()
+        return
+    
+    def filter_trace_list_snr(self):
+        """
+        Filter out traces based on SNR preference. Calculates on st_pref stream. Unusable in current state
+        Issue: SNR should be calculated after filtering. filter_trace_list happens before filtering.
+        idk what the best route is here. Maybe filter stream upon first load, calculate snr, and just use
+        those values?
+
+        """
+        debug_print('TracePlotFrame')
+        
+        snr = float(self.trace_snr_filter_entry.get())
+        self.st_pref_subset = self.st_pref.copy()
+        
+        # if snr preference hasn't changed, don't do anything
+        if snr==0.0:
+            # print('snr not set')
+            return
+        else:
+            self.pref_trace_snr = snr
+            self.n_current_trace = 0
+            # print('snr set to ', snr)
+            for tr in self.st_pref_subset:
+                
+                if hasattr(tr.stats.pick_data,'tdif'):
+                    tdif = tr.stats.pick_data['tdif']
+                else:
+                    tdif = 0
+                
+                t = tr.times() + tdif
+                
+                t0 = t[0]
+                tf = t[-1]
+                
+                delta_t = tf - t0
+                time_buffer = 3*(self.perc_time_buffer/100)*delta_t
+                # print('t window: ',self.t0+time_buffer,self.tf-time_buffer)
+                dwin = tr.data[np.logical_and((t>=t0+time_buffer),(t<=tf-time_buffer))]
+                
+                trmax = np.max(np.abs(dwin))
+                trmean = np.mean(np.abs(dwin))
+                
+                if trmax/trmean < snr:
+                    self.st_pref_subset.remove(tr)
+            self.ntr = len(self.st_pref_subset)
+        return
+            # self.populate_trace_listbox(self.st_pref_subset)
+        
+        
+        
     # this might be used in the future so I'll leave it for now
     # def on_change_trace_order_press(self):
         
@@ -1192,22 +1358,55 @@ class TracePlotFrame(tk.Frame):
     
     def plot_spectrogram(self):
         debug_print('TracePlotFrame')
+        fig = plt.figure(self.fignum_spectrogram)
+        plt.clf()
+        ax = fig.add_subplot(111)
         tr = self.tr_pref.copy()
-        tr.spectrogram()
+        tr.spectrogram(axes=ax, show=False)
+        mappable = ax.images[0]
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel("Frequency (Hz)")
+        ax.set_title(self.title_str)
+        cb = plt.colorbar(mappable=mappable, ax=ax)
+        cb.set_label("Intensity")
+        plt.tight_layout()
+        plt.show()
         return
     
     def plot_ppsd(self):
         debug_print('TracePlotFrame')
+        fig = plt.figure(self.fignum_psd)
+        plt.clf()
+        # ax = fig.add_subplot(111)
         tr = self.tr_pref
         d = tr.data
-        Pxx, freqs = plt.psd(d,Fs=tr.stats.sampling_rate)
+        Pxx, freqs = plt.psd(d,Fs=tr.stats.sampling_rate, figure=fig)
         return
     
     def plot_record_section(self):
-        """
-        placeholder for future use
-
-        """
+        debug_print('TracePlotFrame')
+        
+        try:
+            fig = plt.figure(self.fignum_record_section)
+            plt.clf()
+            if hasattr(self.st[0].stats,'distance'):
+                st_record = self.st_pref
+            else:
+                st_record = self.st_pref
+                for ii in np.arange(len(st_record)):
+                    st_record[ii].stats.distance = st_record[ii].stats.station_data.deldist * 1000
+            st_record.plot(type='section', fig=fig, orientation='horizontal')
+            plt.show()
+        except:
+            print('error with record section')
+        return
+    
+    def update_external_figures(self):
+        fn = plt.get_fignums()
+        if self.fignum_spectrogram in fn: self.plot_spectrogram()
+        if self.fignum_psd in fn: self.plot_ppsd()
+        if self.fignum_response in fn: popup_response(self)
+        if self.fignum_record_section in fn: self.plot_record_section()
         return
         
     def filter_help_popup(self):
@@ -1321,8 +1520,13 @@ class TracePlotFrame(tk.Frame):
 
         """
         for el in self.plugins:
-            sys.modules['.'.join([el, el])].on_traceplotframe_init(self)
-
+            try:
+                sys.modules['.'.join([el, el])].on_traceplotframe_init(self)
+            except:
+                if 'on_traceplotframe_init' in dir(sys.modules['.'.join([el, el])]):
+                    raise ValueError("Error with on_traceplotframe_init() in " + str(el))
+                else:
+                    warnings.warn(str(el) + " has no on_traceplotframe_init() method", UserWarning)
         return
     
     def plugins_on_refresh_st_beginning(self):
@@ -1331,7 +1535,13 @@ class TracePlotFrame(tk.Frame):
 
         """
         for el in self.plugins:
-            sys.modules['.'.join([el, el])].on_refresh_st_beginning(self)
+            try:
+                sys.modules['.'.join([el, el])].on_refresh_st_beginning(self)
+            except:
+                if 'on_refresh_st_beginning' in dir(sys.modules['.'.join([el, el])]):
+                    raise ValueError("Error with on_refresh_st_beginning() in " + str(el))
+                else:
+                    warnings.warn(str(el) + " has no on_refresh_st_beginning() method", UserWarning)
         return
     
     def plugins_on_refresh_st_end(self):
@@ -1340,7 +1550,13 @@ class TracePlotFrame(tk.Frame):
 
         """
         for el in self.plugins:
-            sys.modules['.'.join([el, el])].on_refresh_st_end(self)
+            try:
+                sys.modules['.'.join([el, el])].on_refresh_st_end(self)
+            except:
+                if 'on_refresh_st_end' in dir(sys.modules['.'.join([el, el])]):
+                    raise ValueError("Error with on_refresh_st_end() in " + str(el))
+                else:
+                    warnings.warn(str(el) + " has no on_refresh_st_end() method", UserWarning)
         return
     
     def plugins_on_refresh_beginning(self):
@@ -1349,7 +1565,13 @@ class TracePlotFrame(tk.Frame):
 
         """
         for el in self.plugins:
-            sys.modules['.'.join([el, el])].on_refresh_beginning(self)
+            try:
+                sys.modules['.'.join([el, el])].on_refresh_beginning(self)
+            except:
+                if 'on_refresh_beginning' in dir(sys.modules['.'.join([el, el])]):
+                    raise ValueError("Error with on_refresh_beginning() in " + str(el))
+                else:
+                    warnings.warn(str(el) + " has no on_refresh_beginning() method", UserWarning)
         return
     
     def plugins_on_refresh_end(self):
@@ -1358,7 +1580,13 @@ class TracePlotFrame(tk.Frame):
 
         """
         for el in self.plugins:
-            sys.modules['.'.join([el, el])].on_refresh_end(self)
+            try:
+                sys.modules['.'.join([el, el])].on_refresh_end(self)
+            except:
+                if 'on_refresh_end' in dir(sys.modules['.'.join([el, el])]):
+                    raise ValueError("Error with on_refresh_end() in " + str(el))
+                else:
+                    warnings.warn(str(el) + " has no on_refresh_end() method", UserWarning)
         return
     
     
@@ -1401,6 +1629,27 @@ class TracePlotFrame(tk.Frame):
         
         return
     
+    def print_figure_properties(self):
+        """
+        This is a function used for debugging figure size issues.
+
+        """
+        bbox = self.ax.get_window_extent().transformed(self.fig.dpi_scale_trans.inverted())
+        width, height = bbox.width, bbox.height
+        print('----------------------------')
+        print('Figure size (in): ', self.fig.get_size_inches())
+        print('Figure size (px): ', self.fig.get_size_inches() * self.fig.dpi)
+        print('Figure dpi: ', self.fig.dpi)
+        print('Axes size (px): ', [width, height])
+        print('canvas_widget size: ', [self.canvas_widget.winfo_width(), self.canvas_widget.winfo_height()])
+        print('canvas_frame size: ', [self.canvas_frame.winfo_width(), self.canvas_frame.winfo_height()])
+        print('canvas size: ', self.canvas.get_width_height())
+        print('----------------------------')
+
+        # print(dir(self.canvas))
+        
+        return
+    
         
 #%% REFRESH FUNCTIONS
         
@@ -1417,6 +1666,8 @@ class TracePlotFrame(tk.Frame):
         
         """
         debug_print('TracePlotFrame')
+        global st
+        
         
         # get and store properties
         self.get_stream_level_properties()
@@ -1462,8 +1713,8 @@ class TracePlotFrame(tk.Frame):
             self.pref_filter_bp_corners = self.f3_value
             
             
-            self.f1_label['text'] = 'Freq. min: '
-            self.f2_label['text'] = 'Freq. max: '
+            self.f1_label['text'] = 'F min: '
+            self.f2_label['text'] = 'F max: '
             self.f3_label['text'] = 'Corners: '
             self.f1_entry['state'] = 'enabled'
             self.f2_entry['state'] = 'enabled'
@@ -1492,6 +1743,9 @@ class TracePlotFrame(tk.Frame):
             self.filter_string = 'unfiltered'
             self.name_filter_string = 'unfiltered'
         
+        self.filter_trace_list_snr()
+        st = self.st_pref_subset
+        
         self.plugins_on_refresh_st_end()
         
         self.refresh()
@@ -1512,11 +1766,16 @@ class TracePlotFrame(tk.Frame):
         # if no traces, do nothing
         if self.ntr == 0: return
         
+        self.fig.clear()
+        
+        self.ax = self.fig.add_subplot(111)
+        
+        
         # clear the previous figure/axes
-        self.ax.clear()
+        # self.ax.clear()
         
         # store some values
-        tr = self.st_pref[self.n_current_trace]
+        tr = self.st_pref_subset[self.n_current_trace]
         self.tr_pref = tr.copy()
         self.f_nyquist = self.tr_pref.stats['sampling_rate']/2
         self.nclick = 0
@@ -1595,9 +1854,9 @@ class TracePlotFrame(tk.Frame):
         
         d = self.tr_pref.data
         self.ax.plot(t,d,c='k',zorder=1,linewidth=0.5,label="Trace")
-        self.fig.tight_layout(pad=1.4)
+        # self.fig.tight_layout(pad=1.4)
         
-        self.fig.subplots_adjust(left=0.05, bottom=0.07, right=0.95, top=0.95, wspace=0, hspace=0)
+        # self.fig.subplots_adjust(left=0.05, bottom=0.07, right=0.95, top=0.95, wspace=0, hspace=0)
         
         #%% determine and set good xlim and ylim based on what is plotted
         delta_t = self.tf-self.t0
@@ -1619,7 +1878,7 @@ class TracePlotFrame(tk.Frame):
         
         #%%
         ## plot stuff
-        self.ax.legend(loc='lower right',fontsize=8,framealpha=0.9,frameon=True)
+        self.ax.legend(loc='lower right',fontsize=self.infobox_text_size,framealpha=0.9,frameon=True)
         
         self.fig_title_list = [str(el) for el in [tr.stats.event_data['evid'],tr.id,"M"+str(np.round(tr.stats.event_data['qmag1'],2)),self.filter_string]]
         self.title_str = ' | '.join(self.fig_title_list)
@@ -1628,11 +1887,13 @@ class TracePlotFrame(tk.Frame):
         self.fig_name_list = [str(el) for el in [tr.stats.event_data['evid'],tr.id,self.name_filter_string,str(int(self.t0))+'s-'+str(int(self.tf))+'s']]
         
         
-        self.ax.set_title(self.title_str,fontsize=10)
+        self.ax.set_title(self.title_str,fontsize=self.title_size)
         props = dict(boxstyle='round', facecolor='white', alpha=0.9)
-        self.ax.annotate(tr.id,xy=(0,1),xytext=(5,-5),fontsize=8,xycoords='axes fraction', textcoords='offset points',bbox=props,horizontalalignment='left',verticalalignment='top',zorder=2000)
-        self.ax.tick_params(axis='both', which='major', labelsize=8)
-        self.ax.set(xlabel="Time relative to origin (s)")
+        self.ax.annotate(tr.id,xy=(0,1),xytext=(5,-5),fontsize=self.infobox_text_size,xycoords='axes fraction', textcoords='offset points',bbox=props,horizontalalignment='left',verticalalignment='top',zorder=2000)
+        self.ax.tick_params(axis='both', which='major', labelsize=self.axes_ticklabel_size)
+        self.ax.set_xlabel("Time relative to origin (s)", fontsize=self.axes_label_size)
+        
+        # print(dir(self.ax))
         
         ### upper right info
         if self.pref_plot_picks!='None':
@@ -1643,19 +1904,37 @@ class TracePlotFrame(tk.Frame):
         ep_dist = tr.stats.station_data.deldist
         textstr = '\n'.join(("Ep dist: "+str(round(ep_dist,2))+" km","Fs: "+str(round(tr.stats.sampling_rate,1))+" Hz"))+pick_textlabels
         props = dict(boxstyle='round', facecolor='white', alpha=0.9)
-        self.ax.annotate(textstr,xy=(1,1),xytext=(-5,-5),fontsize=8,xycoords='axes fraction', textcoords='offset points',bbox=props,horizontalalignment='right',verticalalignment='top',zorder=2000)
+        self.ax.annotate(textstr,xy=(1,1),xytext=(-5,-5),fontsize=self.infobox_text_size,xycoords='axes fraction', textcoords='offset points',bbox=props,horizontalalignment='right',verticalalignment='top',zorder=2000)
         
         self.plugins_on_refresh_end()
-        self.fig.tight_layout(pad=1.4)
-        # leave these in order. bad things happen otherwise
+        
+        self.update_external_figures()
+        
+        # this fixes figure size. probably temporary fix but it works for now
+        self.fig.set_dpi(100)
+        self.fig.tight_layout()
+        # pos1 = self.ax.get_position() # get the original position 
+        # pos2 = [pos1.x0 + 0.1, pos1.y0,  pos1.width, pos1.height]
+        # self.ax.set_position(pos2)
+        # print(pos1)
+        
+        # trmax = np.abs(tr.max())
+        # trmean = np.mean(np.abs(tr.data))
+        # print("SNR: %6.3f" %(trmax/trmean))
+        
         self.update()
         self.canvas.draw()
-        
+        # self.update()
+        # self.print_figure_properties()
+
 def plugins_bind_events(frame):
     global plugins
     
     for el in plugins:
-        sys.modules['.'.join([el, el])].on_bind_init(frame)
+        try:
+            sys.modules['.'.join([el, el])].on_bind_init(frame)
+        except:
+            warnings.warn("Error binding events for " + str(el) + ". Skipping.", UserWarning)
     return
 
 #%% Program starts here
@@ -1663,6 +1942,7 @@ def plugins_bind_events(frame):
 #%% LOAD SETTINGS
 global config_debug_mode
 global plugins
+global app_geometry
 
 load_config()
 plugins = load_plugins()
@@ -1686,9 +1966,10 @@ frame_tpf.file_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_file_cha
 frame_tpf.trace_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_trace_change())
 
 # trace filtering
-frame_tpf.trace_filter_id_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_trace_list())
-frame_tpf.trace_filter_dist1_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_trace_list())
-frame_tpf.trace_filter_dist2_entry.bind('<FocusOut>', lambda _: frame_tpf.filter_trace_list())
+frame_tpf.trace_filter_id_entry.bind('<FocusOut>', lambda _: frame_tpf.on_distance_or_id_filter_change())
+frame_tpf.trace_filter_dist1_entry.bind('<FocusOut>', lambda _: frame_tpf.on_distance_or_id_filter_change())
+frame_tpf.trace_filter_dist2_entry.bind('<FocusOut>', lambda _: frame_tpf.on_distance_or_id_filter_change())
+frame_tpf.trace_snr_filter_entry.bind('<FocusOut>', lambda _: frame_tpf.on_snr_filter_change())
 
 # frame_tpf.canvas.bind()
 frame_tpf.canvas.callbacks.connect('button_press_event', frame_tpf.on_canvas_click)
@@ -1698,7 +1979,6 @@ plugins_bind_events(frame_tpf)
 # stop script on window close
 app.protocol("WM_DELETE_WINDOW", app.quit_program)
 
-print(app_geometry)
 app.geometry(get_geometry_string(app_geometry))
 app.minsize(width=app_geometry[1], height=app_geometry[0])
 
