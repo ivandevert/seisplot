@@ -1,5 +1,6 @@
 # seisplot (open to name suggestions)
  Tool for plotting seismogram files
 
-**** CURRENTLY NOT FINISHED ****
-Coming soon
+See the wiki for updated information
+
+https://github.com/ivandevert/seisplot/wiki
