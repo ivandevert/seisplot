@@ -1390,9 +1390,9 @@ class TracePlotFrame(tk.Frame):
             fig = plt.figure(self.fignum_record_section)
             plt.clf()
             if hasattr(self.st[0].stats,'distance'):
-                st_record = self.st_pref
+                st_record = self.st_pref_subset
             else:
-                st_record = self.st_pref
+                st_record = self.st_pref_subset
                 for ii in np.arange(len(st_record)):
                     st_record[ii].stats.distance = st_record[ii].stats.station_data.deldist * 1000
             st_record.plot(type='section', fig=fig, orientation='horizontal')
@@ -1402,6 +1402,7 @@ class TracePlotFrame(tk.Frame):
         return
     
     def update_external_figures(self):
+        debug_print('TracePlotFrame')
         fn = plt.get_fignums()
         if self.fignum_spectrogram in fn: self.plot_spectrogram()
         if self.fignum_psd in fn: self.plot_ppsd()
