@@ -414,7 +414,7 @@ def popup(title,message_str):
 def popup_response(frame):
     """
     Plot the response of the filter. This should maybe be a function in TPF
-
+    Does zerophase have an effect on the response? - don't think so
     """
     
     debug_print('main')
@@ -423,6 +423,7 @@ def popup_response(frame):
     f1 = frame.pref_filter_bp_fmin
     f2 = frame.pref_filter_bp_fmax
     corners = frame.pref_filter_bp_corners
+    zerophase = frame.pref_filter_zerophase
     f_nyquist = frame.f_nyquist
     
     # print('DEBUG: ',tp,freq,f1,f2,corners,f_nyquist)
@@ -734,22 +735,26 @@ class TracePlotFrame(tk.Frame):
         # config.ini file
         
         # Filtering #
-        self.pref_demean = 1                # (0) none, (1) demean, (2) simple detrend
+        self.pref_detrend = 1                # (0) none, (1) demean, (2) simple detrend
+        self.pref_detrend_type = 'Demean'
+        self.pref_detrend_order = 3
+        self.pref_detrend_dspline = 1000
+        self.pref_detrend_options = {}
         self.pref_filter_type = 'highpass'  # 'none', 'lowpass', 'highpass', 'bandpass'
-        self.pref_filter_freq = 5           # default freq for lowpass and highpass
-        self.pref_filter_bp_fmin = 1        # default fmin for bandpass
-        self.pref_filter_bp_fmax = 10       # default fmax for bandpass
-        self.pref_filter_bp_corners = 4     # default corners for bandpass
+        # self.pref_filter_f1 = 5           # default freq for lowpass and highpass
+        self.pref_filter_f1 = 1        # default fmin for bandpass/highpass/lowpass
+        self.pref_filter_f2 = 10       # default fmax for bandpass
+        self.pref_filter_f3 = 4     # default corners for bandpass
+        self.pref_filter_zerophase = False
         self.pref_id_filter_str = '*,*,*,*'
         self.pref_dist1_filter = 0
         self.pref_dist2_filter = 99999
         self.pref_trace_snr = 0
         
-        self.pref_plot_picks = 'Real'       # T/F plot picks
+        self.pref_plot_picks = 'Plot real picks'       # T/F plot picks
         
         # convert pref into str. Can probably do this later and have GUI set to 'null' at first.
-        demean_values = ['None','Demean','Detrend']
-        self.pref_demean_str = demean_values[self.pref_demean]
+        # self.pref_detrend_str = self.pref_detrend_type
                 
         # variables that hold values used for triggering
         self.manual_t_range = False
@@ -815,12 +820,14 @@ class TracePlotFrame(tk.Frame):
         
         spectrogram_button = ttk.Button(navbar_frame,text='Plot spectrogram',command=lambda: self.plot_spectrogram())
         ppsd_button = ttk.Button(navbar_frame,text='Plot PSD',command=lambda: self.plot_ppsd())
+        self.show_response_button = ttk.Button(navbar_frame,text='Response',command=lambda:popup_response(self))
         record_section_button = ttk.Button(navbar_frame, text='Plot record section', command=lambda: self.plot_record_section())
         
         tk.Label(navbar_frame,text=' ',width=10).pack(side='right')
         spectrogram_button.pack(side='right')
         ppsd_button.pack(side='right')
         record_section_button.pack(side='left')
+        self.show_response_button.pack(side='right')
         ### end navigation frame
         
         #%% file nav frame
@@ -873,7 +880,7 @@ class TracePlotFrame(tk.Frame):
         
         # scroll frame
         self.scroll_frame = tk.Frame(canvas_nav_frame)
-        self.scroll_frame.pack(side='right')
+        
         self.scroll_label = tk.Label(self.scroll_frame,text='Scroll')
         self.scroll_left_button = ttk.Button(self.scroll_frame,text='<-',command=lambda: self.scroll(-1),width=2)
         self.scroll_right_button = ttk.Button(self.scroll_frame,text='->',command=lambda: self.scroll(1),width=2)
@@ -881,7 +888,19 @@ class TracePlotFrame(tk.Frame):
         self.scroll_label.pack(side='left')
         self.scroll_right_button.pack(side='left')
         # end scroll frame
+        
+        ### plot picks
+        # plot_picks_values = ['None','Real']
+        plot_picks_values = ["Don't plot picks", "Plot real picks"]
+        # plot_picks_label = tk.Label(canvas_nav_frame,text='Plot picks: ',width=col_lb1_width,anchor='w')
+        # plot_picks_label.grid(column=0,row=2,sticky='w')
+        current_pref_plot_picks = tk.StringVar()
+        self.plot_picks_box = ttk.Combobox(canvas_nav_frame,textvariable=current_pref_plot_picks,values=plot_picks_values,state='readonly',width=10)
+        self.plot_picks_box.pack(side='right')
+        self.plot_picks_box.set(self.pref_plot_picks)
         ### end canvas navigation frame
+        
+        self.scroll_frame.pack(side='right')
         
         #%% trace navigation frame
         trace_nav_buttons_frame = tk.Frame(trace_nav_frame)
@@ -964,15 +983,29 @@ class TracePlotFrame(tk.Frame):
         
         #%% pref frame
         
-        # demean row row=0
-        demean_values = ['None','Demean','Detrend']
-        current_pref_demean = tk.StringVar()
-        demean_label = ttk.Label(pref_frame,text='Detrend option: ',width=col_lb1_width,anchor='w')
-        self.demean_box = ttk.Combobox(pref_frame, textvariable=current_pref_demean,values=demean_values,state='readonly',width=box_width)
-        self.demean_box.set(self.pref_demean_str)
-        demean_label.grid(column=0,row=0,sticky='w')
-        self.demean_box.grid(column=1,row=0,sticky='w',columnspan=6)
-        # end demean row
+        # detrend row row=0
+        detrend_values = ['None', 'Simple', 'Demean', 'Linear', 'Polynomial', 'Spline']
+        current_pref_detrend = tk.StringVar()
+        detrend_label = ttk.Label(pref_frame,text='Detrend option: ',width=col_lb1_width,anchor='w')
+        self.detrend_box = ttk.Combobox(pref_frame, textvariable=current_pref_detrend,values=detrend_values,state='readonly',width=box_width)
+        self.detrend_box.set(self.pref_detrend_type)
+        self.detrend1_entry = ttk.Entry(pref_frame, textvariable=tk.StringVar(), width=4)
+        self.detrend2_entry = ttk.Entry(pref_frame, textvariable=tk.StringVar(), width=4)
+        self.detrend1_label = ttk.Label(pref_frame, text='Order: ', anchor='w')
+        self.detrend2_label = ttk.Label(pref_frame, text='dspline: ', anchor='w')
+        
+        detrend_label.grid(column=0,row=0,sticky='w')
+        self.detrend_box.grid(column=1,row=0,sticky='w')
+        self.detrend1_label.grid(column=2, row=0, sticky='w')
+        self.detrend1_entry.grid(column=3, row=0, sticky='w')
+        self.detrend2_label.grid(column=4, row=0, sticky='w')
+        self.detrend2_entry.grid(column=5, row=0, sticky='w')
+        
+        self.detrend1_entry.insert(0, self.pref_detrend_order)
+        self.detrend2_entry.insert(0, self.pref_detrend_dspline)
+        self.detrend1_entry['state'] = 'disabled'
+        self.detrend2_entry['state'] = 'disabled'
+        # end detrend row
         
         # filter row row=1
         filter_type_values = ['none','highpass','lowpass','bandpass']
@@ -988,11 +1021,12 @@ class TracePlotFrame(tk.Frame):
         self.f1_entry = ttk.Spinbox(pref_frame,width=3,from_=0.001,to=100.0)
         self.f2_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
         self.f3_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
-        self.show_response_button = ttk.Button(pref_frame,text='Response',command=lambda:popup_response(self))
+        self.zerophase_checkbutton_value = tk.IntVar()
+        self.zerophase_checkbutton = ttk.Checkbutton(pref_frame, onvalue=1, offvalue=0, command=lambda : self.on_zerophase_checkbutton_toggle(self.zerophase_checkbutton_value), text=' Zerophase')
         
-        self.f1_entry.insert(0,str(self.pref_filter_freq))
-        self.f2_entry.insert(0,str(self.pref_filter_bp_fmax))
-        self.f3_entry.insert(0,str(self.pref_filter_bp_corners))
+        self.f1_entry.insert(0,str(self.pref_filter_f1))
+        self.f2_entry.insert(0,str(self.pref_filter_f2))
+        self.f3_entry.insert(0,str(self.pref_filter_f3))
         
         # grid filter row
         filter_type_label.grid(column=0,row=1,sticky='w')
@@ -1003,19 +1037,13 @@ class TracePlotFrame(tk.Frame):
         self.f2_entry.grid(column=5,row=1,sticky='w')
         self.f3_label.grid(column=6,row=1,sticky='w')
         self.f3_entry.grid(column=7,row=1,sticky='w')
-        self.show_response_button.grid(column=8,row=1,sticky='e')
+        self.zerophase_checkbutton.grid(column=8, row=1, sticky='e')
+        # self.show_response_button.grid(column=8,row=1,sticky='e')
         
         pref_frame.rowconfigure(1, weight=1)
         # end filter row
         
-        ### plot picks row row=2
-        plot_picks_values = ['None','Real']
-        plot_picks_label = tk.Label(pref_frame,text='Plot picks: ',width=col_lb1_width,anchor='w')
-        plot_picks_label.grid(column=0,row=2,sticky='w')
-        current_pref_plot_picks = tk.StringVar()
-        self.plot_picks_box = ttk.Combobox(pref_frame,textvariable=current_pref_plot_picks,values=plot_picks_values,state='readonly',width=box_width)
-        self.plot_picks_box.grid(column=1,row=2,sticky='w')
-        self.plot_picks_box.set(self.pref_plot_picks)
+        self.on_filter_option_change(True)
         
         self.plugins_grid()
         
@@ -1147,13 +1175,14 @@ class TracePlotFrame(tk.Frame):
     def load_file(self):
         debug_print('TracePlotFrame')
         global n_current_file
+        global efs
         
         # this will soon be an issue (why?)
         self.filepath = self.efs_files[n_current_file]
         # print('ncurr: ',n_current_file)
         self.efs = EFS(self.filepath,np.float32,np.int32)
         self.efs_pref = copy.deepcopy(self.efs)
-        
+        efs = self.efs
         self.st = self.efs_pref.to_obspy(keep_pkdata=True)
         self.st.sort()
         self.st_subset = self.st.copy()
@@ -1292,6 +1321,109 @@ class TracePlotFrame(tk.Frame):
         # self.n_current_trace = 0
         self.populate_trace_listbox(self.st_pref_subset)
         self.refresh_st()
+        return
+    
+    def on_detrend_option_change(self):
+        debug_print('TracePlotFrame')
+        pref_detrend_type = self.detrend_box.get()
+        pref_detrend_order = self.detrend1_entry.get()
+        pref_detrend_dspline = self.detrend2_entry.get()
+        
+        # only update values if anything has changed
+        if np.logical_or(pref_detrend_type != self.pref_detrend_type, np.logical_or(pref_detrend_order != self.pref_detrend_order, pref_detrend_dspline != self.pref_detrend_dspline)):
+            self.pref_detrend_type = pref_detrend_type
+            self.pref_detrend_order = pref_detrend_order
+            self.pref_detrend_dspline = pref_detrend_dspline
+            
+            if self.pref_detrend_type == 'Polynomial':
+                self.pref_detrend_options = {'order':int(self.pref_detrend_order)}
+                self.detrend1_entry['state'] = 'enabled'
+                self.detrend2_entry['state'] = 'disabled'
+                self.detrend1_label['text'] = 'Order'
+                self.detrend2_label['text'] = '----'
+    
+            elif self.pref_detrend_type == 'Spline':
+                self.pref_detrend_options = {'order':int(self.pref_detrend_order), 'dspline':int(self.pref_detrend_dspline)}
+                self.detrend1_entry['state'] = 'enabled'
+                self.detrend2_entry['state'] = 'enabled'
+                self.detrend1_label['text'] = 'Order'
+                self.detrend2_label['text'] = 'dspline'
+            else:
+                self.pref_detrend_options = {}
+                self.detrend1_entry['state'] = 'disabled'
+                self.detrend2_entry['state'] = 'disabled'
+                self.detrend1_label['text'] = '----'
+                self.detrend2_label['text'] = '----'
+    
+            
+            self.refresh_st()
+        return
+    
+    def on_filter_option_change(self, init):
+        debug_print('TracePlotFrame')
+        
+        pref_filter_type = self.filter_type_box.get()
+        f1_value = float(self.f1_entry.get())
+        f2_value = float(self.f2_entry.get())
+        f3_value = int(self.f3_entry.get())
+        pref_filter_zerophase = bool(self.zerophase_checkbutton_value.get())
+        
+        # if init, self. values don't exist yet, so cont is an intermediate control variable
+        if init==True:
+            cont = True
+        elif int(pref_filter_type != self.pref_filter_type) + int(f1_value != self.f1_value) + int(f2_value != self.f2_value) + int(f3_value != self.f3_value) + int(pref_filter_zerophase != self.pref_filter_zerophase) > 0:
+            cont = True
+        else:
+            cont = False
+        
+        if cont == True:
+            self.pref_filter_type = pref_filter_type
+            self.f1_value = f1_value
+            self.f2_value = f2_value
+            self.f3_value = f3_value
+            self.pref_filter_zerophase = pref_filter_zerophase
+            
+            # get values, update labels and entry fields
+            if self.pref_filter_type=='none':
+                self.f1_label['text'] = '----'
+                self.f2_label['text'] = '----'
+                self.f3_label['text'] = '----'
+                self.f1_entry['state'] = 'disabled'
+                self.f2_entry['state'] = 'disabled'
+                self.f3_entry['state'] = 'disabled'
+                self.zerophase_checkbutton['state'] = 'disabled'
+                self.show_response_button['state'] = 'disabled'
+            elif self.pref_filter_type=='highpass' or self.pref_filter_type=='lowpass':
+                self.pref_filter_f1 = self.f1_value
+                
+                self.f2_entry['state'] = 'disabled'
+                self.f3_entry['state'] = 'disabled'
+                self.f1_label['text'] = 'Frequency: '
+                self.f2_label['text'] = '----'
+                self.f3_label['text'] = '----'
+                self.f1_entry['state'] = 'enabled'
+                self.f2_entry['state'] = 'disabled'
+                self.f3_entry['state'] = 'disabled'
+                self.zerophase_checkbutton['state'] = 'enabled'
+                self.show_response_button['state'] = 'enabled'
+    
+            elif self.pref_filter_type=='bandpass':
+                self.pref_filter_f1 = self.f1_value
+                self.pref_filter_f2 = self.f2_value
+                self.pref_filter_f3 = self.f3_value
+                
+                self.f1_label['text'] = 'F min: '
+                self.f2_label['text'] = 'F max: '
+                self.f3_label['text'] = 'Corners: '
+                self.f1_entry['state'] = 'enabled'
+                self.f2_entry['state'] = 'enabled'
+                self.f3_entry['state'] = 'enabled'
+                self.zerophase_checkbutton['state'] = 'enabled'
+                self.show_response_button['state'] = 'enabled'
+                
+            # if this isn't being run on the frame's __init__ function, call refresh_st()
+            if init != True: self.refresh_st()
+        
         return
     
     def filter_trace_list_snr(self):
@@ -1606,24 +1738,25 @@ class TracePlotFrame(tk.Frame):
         """
         
         # get fields
-        self.pref_plot_picks = self.plot_picks_box.get()
-        pref_demean_str = self.demean_box.get()
-        self.pref_filter_type = self.filter_type_box.get()
-        self.f1_value = float(self.f1_entry.get())
-        self.f2_value = float(self.f2_entry.get())
-        self.f3_value = int(self.f3_entry.get())
+        # self.pref_plot_picks = self.plot_picks_box.get()
+        self.pref_detrend_type = self.detrend_box.get()
+        # self.pref_filter_type = self.filter_type_box.get()
+        # self.f1_value = float(self.f1_entry.get())
+        # self.f2_value = float(self.f2_entry.get())
+        # self.f3_value = int(self.f3_entry.get())
+        # self.pref_filter_zerophase = bool(self.zerophase_checkbutton_value.get())
         
         # get values from other frames
         # self.efs_parent_dir_new = self.controller.frames[StartPage].efs_parent_dir
         self.efs_parent_dir = self.controller.frames[StartPage].efs_parent_dir
         
         # quick processing
-        if pref_demean_str=='None':
-            self.pref_demean = 0
-        elif pref_demean_str=='Demean':
-            self.pref_demean = 1
-        elif pref_demean_str=='Detrend':
-            self.pref_demean = 2
+        # if self.pref_detrend_type=='None':
+        #     self.pref_detrend = 0
+        # elif self.pref_detrend_type=='Demean':
+        #     self.pref_detrend = 1
+        # elif self.pref_detrend_type=='Detrend':
+        #     self.pref_detrend = 2
         return
     
     def get_trace_level_properties(self):
@@ -1651,6 +1784,20 @@ class TracePlotFrame(tk.Frame):
         
         return
     
+    def on_zerophase_checkbutton_toggle(self, var):
+        """
+        This is a workaround from https://stackoverflow.com/questions/50276202/tkinter-checkbutton-not-working
+
+        """
+        var.set(not var.get())
+        # zp_state = self.zerophase_checkbutton['state']
+        # print('value: ', self.zerophase_checkbutton_value.get(), ', state: ', zp_state)
+        # print(dir(self.zerophase_checkbutton_value))
+        
+        self.on_filter_option_change(False)
+        # self.refresh_st()
+        return
+    
         
 #%% REFRESH FUNCTIONS
         
@@ -1668,15 +1815,18 @@ class TracePlotFrame(tk.Frame):
         """
         debug_print('TracePlotFrame')
         global st
+        global st_orig
         
         
         # get and store properties
         self.get_stream_level_properties()
         self.plugins_on_refresh_st_beginning()
-        
+        print('zerophase: ', self.pref_filter_zerophase)
         # store a few objects
         self.st_pref = self.st_subset.copy()
         self.ntr = len(self.st_subset)
+        
+        st_orig = self.st_pref.copy()
         
         # if this is a new directory, handle it and populate file listbox. is this necessary/properly located?
         # if self.efs_parent_dir_new != self.efs_parent_dir:
@@ -1685,60 +1835,28 @@ class TracePlotFrame(tk.Frame):
         
         # update filter options
         # self.pref_filter_type = self.filter_type_box.get()
-        
-        # get values, update labels and entry fields
-        if self.pref_filter_type=='none':
-            self.f1_label['text'] = '----'
-            self.f2_label['text'] = '----'
-            self.f3_label['text'] = '----'
-            self.f1_entry['state'] = 'disabled'
-            self.f2_entry['state'] = 'disabled'
-            self.f3_entry['state'] = 'disabled'
-            self.show_response_button['state'] = 'disabled'
-        elif self.pref_filter_type=='highpass' or self.pref_filter_type=='lowpass':
-            self.pref_filter_freq = self.f1_value
-            
-            self.f2_entry['state'] = 'disabled'
-            self.f3_entry['state'] = 'disabled'
-            self.f1_label['text'] = 'Frequency: '
-            self.f2_label['text'] = '----'
-            self.f3_label['text'] = '----'
-            self.f1_entry['state'] = 'enabled'
-            self.f2_entry['state'] = 'disabled'
-            self.f3_entry['state'] = 'disabled'
-            self.show_response_button['state'] = 'enabled'
-
-        elif self.pref_filter_type=='bandpass':
-            self.pref_filter_bp_fmin = self.f1_value
-            self.pref_filter_bp_fmax = self.f2_value
-            self.pref_filter_bp_corners = self.f3_value
-            
-            
-            self.f1_label['text'] = 'F min: '
-            self.f2_label['text'] = 'F max: '
-            self.f3_label['text'] = 'Corners: '
-            self.f1_entry['state'] = 'enabled'
-            self.f2_entry['state'] = 'enabled'
-            self.f3_entry['state'] = 'enabled'
-            self.show_response_button['state'] = 'enabled'
 
         ##### apply preferences #####
-        # if self.pref_demean==0: # do nothing
-        if self.pref_demean==1:
-            self.st_pref.detrend('simple')
-        elif self.pref_demean==2:
-            self.st_pref.detrend('linear')
+        # if self.pref_detrend==0: # do nothing
+        # if self.pref_detrend_type==:
+        #     self.st_pref.detrend('simple')
+        # elif self.pref_detrend_type==2:
+        #     self.st_pref.detrend('linear')
+        
+        # DETREND OPTION
+        if self.pref_detrend_type != 'None':
+            self.st_pref.detrend(self.pref_detrend_type.lower(), **self.pref_detrend_options)
         
         # filter and set filter string
         if self.pref_filter_type=='highpass' or self.pref_filter_type=='lowpass':
-            self.st_pref.filter(self.pref_filter_type,freq=self.pref_filter_freq)
-            self.filter_string = self.pref_filter_type + ", f="+str(self.pref_filter_freq)+" Hz"
-            self.name_filter_string = self.pref_filter_type +str(self.pref_filter_freq)
+            self.st_pref.filter(self.pref_filter_type,freq=self.pref_filter_f1, zerophase=self.pref_filter_zerophase)
+            self.filter_string = self.pref_filter_type + ", f="+str(self.pref_filter_f1)+" Hz"
+            self.name_filter_string = self.pref_filter_type +str(self.pref_filter_f1)
             
         elif self.pref_filter_type=='bandpass':
-            self.st_pref.filter(self.pref_filter_type,freqmin=self.pref_filter_bp_fmin,freqmax=self.pref_filter_bp_fmax,corners=self.pref_filter_bp_corners)
-            self.filter_string = self.pref_filter_type + " (fmin,fmax)=("+str(self.pref_filter_bp_fmin) + ","+str(self.pref_filter_bp_fmax)+") Hz, corners="+str(self.pref_filter_bp_corners)
-            self.name_filter_string = self.pref_filter_type +str(self.pref_filter_bp_fmin) + "-"+str(self.pref_filter_bp_fmax)+"."+str(self.pref_filter_bp_corners)+'corners'
+            self.st_pref.filter(self.pref_filter_type,freqmin=self.pref_filter_f1,freqmax=self.pref_filter_f2,corners=self.pref_filter_f3, zerophase=self.pref_filter_zerophase)
+            self.filter_string = self.pref_filter_type + " (fmin,fmax)=("+str(self.pref_filter_f1) + ","+str(self.pref_filter_f2)+") Hz, corners="+str(self.pref_filter_f3)
+            self.name_filter_string = self.pref_filter_type +str(self.pref_filter_f1) + "-"+str(self.pref_filter_f2)+"."+str(self.pref_filter_f3)+'corners'
         
         elif self.pref_filter_type=='none':
             self.filter_string = 'unfiltered'
@@ -1746,6 +1864,8 @@ class TracePlotFrame(tk.Frame):
         
         self.filter_trace_list_snr()
         st = self.st_pref_subset
+        
+        self.populate_trace_listbox(st)
         
         self.plugins_on_refresh_st_end()
         
@@ -1800,6 +1920,7 @@ class TracePlotFrame(tk.Frame):
         t = self.tr_pref.times() + tdif
         self.tmin = min(t)
         self.tmax = max(t)
+        self.pref_plot_picks = self.plot_picks_box.get()
         
         # done updating things
         
@@ -1807,7 +1928,7 @@ class TracePlotFrame(tk.Frame):
         
         # this should be added as a plugin
         pickn,pickt,pickq = [],[],[]
-        if self.pref_plot_picks!='None':
+        if self.pref_plot_picks!="Don't plot picks":
             pickn,pickt,pickq = get_picks(self.tr_pref)
             
             # only plot picks if there are picks
@@ -1835,10 +1956,10 @@ class TracePlotFrame(tk.Frame):
                     else:
                         ls = '-'
                         lb = pickn[ii]+' arrival'
-                    if self.pref_plot_picks=='Real':
+                    if self.pref_plot_picks=='Plot real picks':
                         if pickq[ii]>0.1: self.ax.axvline(pt,c=pickc[ii],linestyle=ls,zorder=3,label=lb)
-                    elif self.pref_plot_picks=='All':
-                        self.ax.axvline(pt,c=pickc[ii],linestyle=ls,zorder=3,label=lb)
+                    # elif self.pref_plot_picks=='All':
+                    #     self.ax.axvline(pt,c=pickc[ii],linestyle=ls,zorder=3,label=lb)
         
         # if auto-zoom couldn't find something to zoom to
         if self.tf==-99999:
@@ -1955,16 +2076,20 @@ frame_tpf = app.frames[TracePlotFrame]
 frame_start = app.frames[StartPage]
 
 # bind events to functions
-frame_tpf.demean_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.refresh_st())
-frame_tpf.filter_type_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.refresh_st())
-frame_tpf.f1_entry.bind('<FocusOut>', lambda _: frame_tpf.refresh_st())
-# frame_tpf.filter_bp_fmin_entry.bind('<FocusOut>', lambda _: frame_tpf.refresh_st())
-frame_tpf.f2_entry.bind('<FocusOut>', lambda _: frame_tpf.refresh_st())
-frame_tpf.f3_entry.bind('<FocusOut>', lambda _: frame_tpf.refresh_st())
-frame_tpf.plot_picks_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.refresh_st())
+frame_tpf.detrend_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.on_detrend_option_change())
+frame_tpf.filter_type_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.on_filter_option_change(False))
+frame_tpf.f1_entry.bind('<FocusOut>', lambda _: frame_tpf.on_filter_option_change(False))
+frame_tpf.f2_entry.bind('<FocusOut>', lambda _: frame_tpf.on_filter_option_change(False))
+frame_tpf.f3_entry.bind('<FocusOut>', lambda _: frame_tpf.on_filter_option_change(False))
+frame_tpf.plot_picks_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.refresh(False))
 
 frame_tpf.file_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_file_change())
 frame_tpf.trace_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_trace_change())
+
+# trace detrending
+frame_tpf.detrend1_entry.bind('<FocusOut>', lambda _: frame_tpf.on_detrend_option_change())
+frame_tpf.detrend2_entry.bind('<FocusOut>', lambda _: frame_tpf.on_detrend_option_change())
+
 
 # trace filtering
 frame_tpf.trace_filter_id_entry.bind('<FocusOut>', lambda _: frame_tpf.on_distance_or_id_filter_change())
