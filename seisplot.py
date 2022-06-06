@@ -15,7 +15,6 @@ channel naming convention: https://ds.iris.edu/ds/nodes/dmc/data/formats/seed-ch
 
 TO DO:
     add other filters
-    add resampling option
     add error logging
     make yaxis labels constant width
     add plot settings bar
@@ -28,6 +27,7 @@ TO DO:
     start (temp fix). A better solution should be implemented.
     
     add except Exception as err: print(err) to plugin functions
+    after filtering station ids, trace nav frame is a little wonky
 
 """
 import tkinter as tk
@@ -2021,6 +2021,8 @@ class TracePlotFrame(tk.Frame):
         self.ax.tick_params(axis='both', which='major', labelsize=self.axes_ticklabel_size)
         self.ax.set_xlabel("Time relative to origin (s)", fontsize=self.axes_label_size)
         
+        self.ax.yaxis.set_major_formatter(mpl.ticker.FormatStrFormatter('%3.1e'))
+        
         # print(dir(self.ax))
         
         ### upper right info
@@ -2052,6 +2054,8 @@ class TracePlotFrame(tk.Frame):
         
         self.update()
         self.canvas.draw()
+        
+        print(plt.get_fignums())
         # self.update()
         # self.print_figure_properties()
 
@@ -2088,7 +2092,7 @@ frame_tpf.filter_type_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.on_fi
 frame_tpf.f1_entry.bind('<FocusOut>', lambda _: frame_tpf.on_filter_option_change(False))
 frame_tpf.f2_entry.bind('<FocusOut>', lambda _: frame_tpf.on_filter_option_change(False))
 frame_tpf.f3_entry.bind('<FocusOut>', lambda _: frame_tpf.on_filter_option_change(False))
-frame_tpf.plot_picks_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.refresh(False))
+frame_tpf.plot_picks_box.bind('<<ComboboxSelected>>', lambda _: frame_tpf.refresh())
 
 frame_tpf.file_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_file_change())
 frame_tpf.trace_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_trace_change())
