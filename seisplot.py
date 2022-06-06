@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sun Apr 17 08:09:03 2022
-
 @author: ivandevert
+
+GitHub repo: https://github.com/ivandevert/seisplot
 
 channel naming convention: https://ds.iris.edu/ds/nodes/dmc/data/formats/seed-channel-naming/
     letter order: 
@@ -82,8 +82,6 @@ LARGE_FONT= ("Verdana", 12)
 DEF_GEOMETRY = [530, 1120]
 DEF_CANVAS_GEOMETRY = [455, 845]
 
-
-
 global CONFIG_FILENAME
 CONFIG_FILENAME = 'config.ini'
 
@@ -115,7 +113,7 @@ def get_geometry_string(geometry_list):
     lh = str(len(str(geometry_list[0])))
     return str('%'+lw+'ix%'+lh+'i') % (geometry_list[1], geometry_list[0])
 
-def load_plugins():
+def load_plugins(active_plugins):
     """
     Load plugin modules and store them in globals().
     
@@ -136,13 +134,16 @@ def load_plugins():
     
     for el in os.listdir(pth):
         if Path(pth + el).is_dir() and el[0] != '_':
-            try:
-                globals()[el] = importlib.import_module(el+'.'+el, package=el)
-                plugins.append(el)
-                plugin_total_height += sys.modules['.'.join([el, el])].frame_height
-                print('Plugin ' + el + ' loaded successfully')
-            except:
-                print("Error loading plugin " + el + ". Skipping.")
+            if el in active_plugins:
+                try:
+                    globals()[el] = importlib.import_module(el+'.'+el, package=el)
+                    plugins.append(el)
+                    plugin_total_height += sys.modules['.'.join([el, el])].frame_height
+                    print('Plugin ' + el + ' loaded successfully')
+                except:
+                    print("Error loading plugin " + el + ". Skipping.")
+            else:
+                print("Plugin " + el + " not active.")
     return plugins
 
 def str2bool(string):
@@ -171,6 +172,7 @@ def init_config_file():
     config.set('settings', 'config_p_wave_color', 'r')
     config.set('settings', 'config_s_wave_color', 'c')
     config.set('settings', 'config_debug_mode', 'False')
+    config.set('settings', 'config_active_plugins', '')
     
     config.write(open('config.ini', 'w'))
     return
@@ -192,6 +194,8 @@ def load_config():
     global config_p_wave_color
     global config_s_wave_color
     global config_debug_mode
+    global active_plugins
+    
     config = ConfigParser()
     
     if not os.path.isfile(CONFIG_FILENAME): init_config_file()
@@ -201,7 +205,9 @@ def load_config():
     config_p_wave_color = config.get('settings', 'config_p_wave_color').strip()
     config_s_wave_color = config.get('settings', 'config_s_wave_color').strip()
     config_debug_mode = str2bool(config.get('settings', 'config_debug_mode').strip())
-    print('DEBUGGING: ', config_debug_mode)
+    config_active_plugins = config.get('settings', 'config_active_plugins').split(',')
+    active_plugins = [el.strip() for el in config_active_plugins]
+    # print('DEBUGGING: ', config_debug_mode)
     return
 
 def save_config(setting_name, setting_value):
@@ -419,18 +425,18 @@ def popup_response(frame):
     
     debug_print('main')
     tp = frame.pref_filter_type
-    freq = frame.pref_filter_freq
-    f1 = frame.pref_filter_bp_fmin
-    f2 = frame.pref_filter_bp_fmax
-    corners = frame.pref_filter_bp_corners
+    # freq = frame.pref_filter_freq
+    f1 = frame.pref_filter_f1
+    f2 = frame.pref_filter_f2
+    f3 = frame.pref_filter_f3
     zerophase = frame.pref_filter_zerophase
     f_nyquist = frame.f_nyquist
     
-    # print('DEBUG: ',tp,freq,f1,f2,corners,f_nyquist)
+    # print('DEBUG: ',tp,freq,f1,f2,f3,f_nyquist)
     
     if tp == 'highpass' or tp == 'lowpass':
         btype = tp
-        F = freq/f_nyquist
+        F = f1/f_nyquist
     elif tp == 'bandpass':
         btype = 'band'
         F = [f1/f_nyquist, f2/f_nyquist]
@@ -439,13 +445,13 @@ def popup_response(frame):
         print('error showing response')
         return
 
-    b, a = signal.iirfilter(corners,F,btype=btype,ftype='butter')
+    b, a = signal.iirfilter(f3,F,btype=btype,ftype='butter')
     w, h = signal.freqz(b,a,fs=f_nyquist*2,worN=512)
         
     fig = plt.figure(frame.fignum_response)
     plt.clf()
     ax = fig.add_subplot(111)
-    ax.plot(w, 20* np.log10(np.abs(h)))
+    ax.plot(w[1:-1], 20 * np.log10(np.abs(h[1:-1])))
     ax.set_title('Butterworth ' + tp + ' frequency response')
     ax.set_xlabel('Frequency (Hz)')
     ax.set_ylabel('Amplitude (dB)')
@@ -820,7 +826,7 @@ class TracePlotFrame(tk.Frame):
         
         spectrogram_button = ttk.Button(navbar_frame,text='Plot spectrogram',command=lambda: self.plot_spectrogram())
         ppsd_button = ttk.Button(navbar_frame,text='Plot PSD',command=lambda: self.plot_ppsd())
-        self.show_response_button = ttk.Button(navbar_frame,text='Response',command=lambda:popup_response(self))
+        self.show_response_button = ttk.Button(navbar_frame,text='Filter response',command=lambda:popup_response(self))
         record_section_button = ttk.Button(navbar_frame, text='Plot record section', command=lambda: self.plot_record_section())
         
         tk.Label(navbar_frame,text=' ',width=10).pack(side='right')
@@ -1257,7 +1263,7 @@ class TracePlotFrame(tk.Frame):
         # refresh the trace listbox and stream, and set the current trace to 0
         # if snr option is set, skip populate_trace_listbox() (because it will be called later)
         if snr < 0.0001:
-            self.populate_trace_listbox(self.st_subset)
+            self.populate_trace_listbox(self.st_pref_subset)
         # self.n_current_trace = 0
         self.on_trace_change()
         self.refresh_st()
@@ -1282,7 +1288,7 @@ class TracePlotFrame(tk.Frame):
         
         # if nothing changed, return.
         if id_str == self.pref_id_filter_str and distance1 == self.pref_dist1_filter and distance2 == self.pref_dist2_filter: 
-            print('unchanged')
+            # print('unchanged')
             return
         
         # otherwise, select only the traces fitting the parameters
@@ -1821,7 +1827,7 @@ class TracePlotFrame(tk.Frame):
         # get and store properties
         self.get_stream_level_properties()
         self.plugins_on_refresh_st_beginning()
-        print('zerophase: ', self.pref_filter_zerophase)
+        # print('zerophase: ', self.pref_filter_zerophase)
         # store a few objects
         self.st_pref = self.st_subset.copy()
         self.ntr = len(self.st_subset)
@@ -2065,9 +2071,10 @@ def plugins_bind_events(frame):
 global config_debug_mode
 global plugins
 global app_geometry
+global active_plugins
 
 load_config()
-plugins = load_plugins()
+plugins = load_plugins(active_plugins)
 
 app_geometry = np.add(DEF_GEOMETRY, [plugin_total_height, 0])
 
@@ -2109,8 +2116,3 @@ app.geometry(get_geometry_string(app_geometry))
 app.minsize(width=app_geometry[1], height=app_geometry[0])
 
 app.mainloop()
-
-
-
-
-
