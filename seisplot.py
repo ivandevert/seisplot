@@ -36,6 +36,7 @@ import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+mpl.use("TkAgg")
 
 # efspy_module_parent_dir = "/Users/ivandevert/prog/efspy/resources/"
 
@@ -253,9 +254,17 @@ def debug_print(parent_name):
 
     """
     global config_debug_mode
+    global frame_tpf
+
     if config_debug_mode==True:
-        print('DEBUG: ', parent_name, inspect.currentframe().f_back.f_code.co_name)
-        
+        print('DEBUG: ', parent_name, inspect.currentframe().f_back.f_code.co_name, end='')
+        try:
+            # print('\t fig: ', frame_tpf.fig.get_gid(), end='')
+            print('\t nclick: ', frame_tpf.nclick, end='')
+        except:
+            print('', end='')
+
+        print('\n', end='')
 
 def slash(pth):
     """
@@ -314,13 +323,13 @@ def get_picks(tr):
                 pick_names = np.append(pick_names,tr.stats.pick_data[pt+"name"].strip())
                 pick_qualities = np.append(pick_qualities,float(tr.stats.pick_data[pt+"q"]))
     
-    # for efs objects
-    elif type(tr)==dict:
-        for pt in picklabels:
-            if tr[pt+"name"] != '    ': # maybe use .strip() != '' or something
-                picks = np.append(picks,tr[pt])
-                pick_names = np.append(pick_names,tr[pt+"name"].strip())
-                pick_qualities = np.append(pick_qualities,float(tr[pt+"q"]))
+    # # for efs objects
+    # elif type(tr)==dict:
+    #     for pt in picklabels:
+    #         if tr[pt+"name"] != '    ': # maybe use .strip() != '' or something
+    #             picks = np.append(picks,tr[pt])
+    #             pick_names = np.append(pick_names,tr[pt+"name"].strip())
+    #             pick_qualities = np.append(pick_qualities,float(tr[pt+"q"]))
     return pick_names,picks,pick_qualities
 
 def best_picks(pickn,pickt,pickq):
@@ -470,6 +479,7 @@ class SeisPlot(tk.Tk):
         Initialization function
         
         """
+
         global filepath
         global n_current_file
         
@@ -558,7 +568,7 @@ class StartPage(tk.Frame):
 
         """
         debug_print('StartPage')
-        
+                
         global n_current_file
         global config_default_filepath
         global plugins
@@ -757,14 +767,15 @@ class TracePlotFrame(tk.Frame):
         self.pref_dist2_filter = 99999
         self.pref_trace_snr = 0
         
-        self.pref_plot_picks = 'Plot real picks'       # T/F plot picks
+        self.pref_plot_picks = 'Real'       # T/F plot picks
         
         # convert pref into str. Can probably do this later and have GUI set to 'null' at first.
         # self.pref_detrend_str = self.pref_detrend_type
                 
         # variables that hold values used for triggering
         self.manual_t_range = False
-        self.nclick = 1
+        self.changing_t_range = False
+        self.nclick = 0
         
         # load other preferences
         self.p_c = config_p_wave_color
@@ -879,10 +890,10 @@ class TracePlotFrame(tk.Frame):
         ### end canvas frame
         
         #%% canvas navigation frame
-        self.zoom_toggle_button = ttk.Button(canvas_nav_frame,text='Change time range', command=lambda: self.zoom_toggle())
+        self.zoom_toggle_button = ttk.Button(canvas_nav_frame,text='Change time range', command=lambda: self.on_zoom_toggle_click())
         self.zoom_toggle_button.pack(side='left')
-        self.zoom_status = tk.Label(canvas_nav_frame,text='',fg='red',width=20)
-        self.zoom_status.pack(side='left')
+        self.zoom_status_label = tk.Label(canvas_nav_frame,text='',fg='red',width=20)
+        self.zoom_status_label.pack(side='left')
         
         # scroll frame
         self.scroll_frame = tk.Frame(canvas_nav_frame)
@@ -897,7 +908,7 @@ class TracePlotFrame(tk.Frame):
         
         ### plot picks
         # plot_picks_values = ['None','Real']
-        plot_picks_values = ["Don't plot picks", "Plot real picks"]
+        plot_picks_values = ["None", "Real"]
         # plot_picks_label = tk.Label(canvas_nav_frame,text='Plot picks: ',width=col_lb1_width,anchor='w')
         # plot_picks_label.grid(column=0,row=2,sticky='w')
         current_pref_plot_picks = tk.StringVar()
@@ -1028,7 +1039,7 @@ class TracePlotFrame(tk.Frame):
         self.f2_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
         self.f3_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
         self.zerophase_checkbutton_value = tk.IntVar()
-        self.zerophase_checkbutton = ttk.Checkbutton(pref_frame, onvalue=1, offvalue=0, command=lambda : self.on_zerophase_checkbutton_toggle(self.zerophase_checkbutton_value), text=' Zerophase')
+        self.zerophase_checkbutton = ttk.Checkbutton(pref_frame, onvalue=1, offvalue=0, command=lambda _: self.on_zerophase_checkbutton_toggle(self.zerophase_checkbutton_value), text=' Zerophase')
         
         self.f1_entry.insert(0,str(self.pref_filter_f1))
         self.f2_entry.insert(0,str(self.pref_filter_f2))
@@ -1066,8 +1077,8 @@ class TracePlotFrame(tk.Frame):
 #%%
         
         self.n_current_trace = 0
-        self.t0 = 0
-        self.tf = -99999
+        self.t0 = 0.0
+        self.tf = -99999.
         
         # let the plugins initialize
         self.plugins_on_traceplotframe_init()
@@ -1088,7 +1099,7 @@ class TracePlotFrame(tk.Frame):
         Grid the plugins
 
         """
-        
+        debug_print('TracePlotFrame n='+str(len(plugins)))
         nplugins = len(plugins)
         
         self.plugin_frames = [[]] * nplugins
@@ -1542,10 +1553,18 @@ class TracePlotFrame(tk.Frame):
     def update_external_figures(self):
         debug_print('TracePlotFrame')
         fn = plt.get_fignums()
-        if self.fignum_spectrogram in fn: self.plot_spectrogram()
-        if self.fignum_psd in fn: self.plot_ppsd()
-        if self.fignum_response in fn: popup_response(self)
-        if self.fignum_record_section in fn: self.plot_record_section()
+        if self.fignum_spectrogram in fn: 
+            self.plot_spectrogram()
+            print('spectrogram updated')
+        if self.fignum_psd in fn: 
+            self.plot_ppsd()
+            print('psd updated')
+        if self.fignum_response in fn: 
+            popup_response(self)
+            print('response updated')
+        if self.fignum_record_section in fn: 
+            self.plot_record_section()
+            print('record section updated')
         return
         
     def filter_help_popup(self):
@@ -1575,27 +1594,30 @@ class TracePlotFrame(tk.Frame):
     
 #%% PLOT MANIPULATION FUNCTIONS
     
-    def zoom_toggle(self):
+    def on_zoom_toggle_click(self):
         debug_print('TracePlotFrame')
         
-        # changing to auto t range
+        # If t range is already being manually set, reset the zoom
         if self.manual_t_range:
             self.reset_zoom()
             
-        # changing to manual t range
+        # Otherwise, start zoom process
         else:
             self.manual_t_range = True
+            self.changing_t_range = True
+            self.nclick = 0
             self.zoom_toggle_button['text'] = 'Reset zoom'
-            self.zoom_status['text'] = 'Select t1'
+            self.zoom_status_label['text'] = 'Select t1'
             
         self.refresh()
     
     def reset_zoom(self):
         debug_print('TracePlotFrame')
-        self.tf = -99999
-        self.t0 = 0
-        self.zoom_status['text'] = ''
+        self.tf = -99999.0
+        self.t0 = 0.0
+        self.zoom_status_label['text'] = ''
         self.manual_t_range = False
+        self.changing_t_range = False
         self.zoom_toggle_button['text'] = 'Change time range'
     
     
@@ -1606,11 +1628,12 @@ class TracePlotFrame(tk.Frame):
         # if on manual zoom
         if self.manual_t_range:
             if event.inaxes is not None:
-                # print('click')
+                self.nclick += 1
+                print("THIS, nclick = ", self.nclick)
                 if self.nclick==1:
                     self.t1 = event.xdata
-                    self.nclick += 1
-                    self.zoom_status['text'] = 'Select t2'
+                    # self.nclick += 1
+                    self.zoom_status_label['text'] = 'Select t2'
                 elif self.nclick==2:
                     self.t2 = event.xdata
                     trange = [self.t1,self.t2]
@@ -1619,7 +1642,8 @@ class TracePlotFrame(tk.Frame):
                     self.t0 = trange[0]
                     self.tf = trange[1]
                     self.nclick = 0
-                    self.zoom_status['text'] = 'Select t1'
+                    self.zoom_status_label['text'] = 'Select t1'
+                    self.changing_t_range = False
                     self.refresh()
                 
             else:
@@ -1658,6 +1682,7 @@ class TracePlotFrame(tk.Frame):
         This runs when TracePlotFrame is initialized
 
         """
+        debug_print('\tTracePlotFrame')
         for el in self.plugins:
             try:
                 sys.modules['.'.join([el, el])].on_traceplotframe_init(self)
@@ -1673,6 +1698,7 @@ class TracePlotFrame(tk.Frame):
         This runs at the beginning of refresh_st()
 
         """
+        debug_print('\tTracePlotFrame')
         for el in self.plugins:
             try:
                 sys.modules['.'.join([el, el])].on_refresh_st_beginning(self)
@@ -1688,6 +1714,7 @@ class TracePlotFrame(tk.Frame):
         This runs at the end of refresh_st()
 
         """
+        debug_print('\tTracePlotFrame')
         for el in self.plugins:
             try:
                 sys.modules['.'.join([el, el])].on_refresh_st_end(self)
@@ -1703,6 +1730,7 @@ class TracePlotFrame(tk.Frame):
         This runs at the beginning of refresh()
 
         """
+        debug_print('\tTracePlotFrame')
         for el in self.plugins:
             try:
                 sys.modules['.'.join([el, el])].on_refresh_beginning(self)
@@ -1718,6 +1746,7 @@ class TracePlotFrame(tk.Frame):
         This runs at the end of refresh()
 
         """
+        debug_print('\tTracePlotFrame')
         for el in self.plugins:
             try:
                 sys.modules['.'.join([el, el])].on_refresh_end(self)
@@ -1731,6 +1760,42 @@ class TracePlotFrame(tk.Frame):
     
 #%% MISCELLANEOUS FUNCTIONS
 
+    def fill_fields(self):
+        """
+        There is a weird bug that deletes info in all the tk entries after about 7 clicks in the trace selection box. 
+        I have no idea what causes it. The fields are deleted in the refresh() function on the line that has "self.ax = self.fig.add_subplot(1, 1, 1)".
+        It may be an issue with using TkAgg as a backend.
+        """
+        debug_print('TracePlotFrame')
+        # print(self.pref_plot_picks)
+        if self.trace_filter_id_entry.get() == '':
+            self.detrend1_entry.delete(0, 'end')
+            self.detrend2_entry.delete(0, 'end')
+            self.f1_entry.delete(0, 'end')
+            self.f2_entry.delete(0, 'end')
+            self.f3_entry.delete(0, 'end')
+            self.trace_filter_id_entry.delete(0, 'end')
+            self.trace_filter_dist1_entry.delete(0, 'end')
+            self.trace_filter_dist2_entry.delete(0, 'end')
+            self.trace_snr_filter_entry.delete(0, 'end')
+            
+            self.detrend_box.set(self.pref_detrend_type)
+            self.detrend1_entry.insert(0, self.pref_detrend_order)
+            self.detrend2_entry.insert(0, self.pref_detrend_dspline)
+            self.filter_type_box.set(self.pref_filter_type)
+            self.f1_entry.insert(0, self.pref_filter_f1)
+            self.f2_entry.insert(0, self.pref_filter_f2)
+            self.f3_entry.insert(0, self.pref_filter_f3)
+            # self.pref_filter_zerophase = False
+            self.trace_filter_id_entry.insert(0, self.pref_id_filter_str)
+            self.trace_filter_dist1_entry.insert(0, self.pref_dist1_filter)
+            self.trace_filter_dist2_entry.insert(0, self.pref_dist2_filter)
+            self.trace_snr_filter_entry.insert(0, self.pref_trace_snr)
+            
+            self.plot_picks_box.set(self.pref_plot_picks)
+
+
+
     def save_figure(self):
         debug_print('TracePlotFrame')
         Path('figures/').mkdir(exist_ok=True)
@@ -1742,7 +1807,7 @@ class TracePlotFrame(tk.Frame):
         Gets all GUI fields and stores them in the object
 
         """
-        
+        debug_print('TracePlotFrame')
         # get fields
         # self.pref_plot_picks = self.plot_picks_box.get()
         self.pref_detrend_type = self.detrend_box.get()
@@ -1766,7 +1831,7 @@ class TracePlotFrame(tk.Frame):
         return
     
     def get_trace_level_properties(self):
-        
+        debug_print('TracePlotFrame')
         return
     
     def print_figure_properties(self):
@@ -1774,6 +1839,7 @@ class TracePlotFrame(tk.Frame):
         This is a function used for debugging figure size issues.
 
         """
+        debug_print('TracePlotFrame')
         bbox = self.ax.get_window_extent().transformed(self.fig.dpi_scale_trans.inverted())
         width, height = bbox.width, bbox.height
         print('----------------------------')
@@ -1795,6 +1861,7 @@ class TracePlotFrame(tk.Frame):
         This is a workaround from https://stackoverflow.com/questions/50276202/tkinter-checkbutton-not-working
 
         """
+        debug_print('TracePlotFrame')
         var.set(not var.get())
         # zp_state = self.zerophase_checkbutton['state']
         # print('value: ', self.zerophase_checkbutton_value.get(), ', state: ', zp_state)
@@ -1891,12 +1958,15 @@ class TracePlotFrame(tk.Frame):
         debug_print('TracePlotFrame')
         
         # if no traces, do nothing
-        if self.ntr == 0: return
+        if self.ntr == 0: 
+            print('no traces')
+            return
         
         self.fig.clear()
-        
-        self.ax = self.fig.add_subplot(111)
-        
+        debug_print('TracePlotFrame b1')
+        # self.ax = self.fig.add_subplot(111)
+        self.ax = self.fig.add_subplot(1, 1, 1)
+        debug_print('TracePlotFrame b2')
         
         # clear the previous figure/axes
         # self.ax.clear()
@@ -1905,7 +1975,8 @@ class TracePlotFrame(tk.Frame):
         tr = self.st_pref_subset[self.n_current_trace]
         self.tr_pref = tr.copy()
         self.f_nyquist = self.tr_pref.stats['sampling_rate']/2
-        self.nclick = 0
+        # print('nyquist: ', self.f_nyquist)
+        # self.nclick = 0
         
         # make tdif compatible with non-efs files
         if hasattr(tr.stats.pick_data,'tdif'):
@@ -1926,15 +1997,14 @@ class TracePlotFrame(tk.Frame):
         t = self.tr_pref.times() + tdif
         self.tmin = min(t)
         self.tmax = max(t)
-        self.pref_plot_picks = self.plot_picks_box.get()
-        
+        if self.plot_picks_box.get() != '': self.pref_plot_picks = self.plot_picks_box.get()
         # done updating things
         
         self.plugins_on_refresh_beginning()
         
         # this should be added as a plugin
         pickn,pickt,pickq = [],[],[]
-        if self.pref_plot_picks!="Don't plot picks":
+        if self.pref_plot_picks=="Real":
             pickn,pickt,pickq = get_picks(self.tr_pref)
             
             # only plot picks if there are picks
@@ -1962,7 +2032,7 @@ class TracePlotFrame(tk.Frame):
                     else:
                         ls = '-'
                         lb = pickn[ii]+' arrival'
-                    if self.pref_plot_picks=='Plot real picks':
+                    if self.pref_plot_picks=='Real':
                         if pickq[ii]>0.1: self.ax.axvline(pt,c=pickc[ii],linestyle=ls,zorder=3,label=lb)
                     # elif self.pref_plot_picks=='All':
                     #     self.ax.axvline(pt,c=pickc[ii],linestyle=ls,zorder=3,label=lb)
@@ -1972,13 +2042,13 @@ class TracePlotFrame(tk.Frame):
             self.t0 = t[0]
             self.tf = t[-1]
             self.perc_time_buffer = 1
-        else:
-            # this is weird, revise
-            if self.nclick==0:
-                # print(self.t0,self.tf)
-                self.nclick = 1
+        # else:
+        #     # this is weird, revise
+        #     if self.nclick==0:
+        #         print(self.t0,self.tf)
+        #         self.nclick = 1
             
-            
+        # debug_print('TracePlotFrame g')    
         
         d = self.tr_pref.data
         self.ax.plot(t,d,c='k',zorder=1,linewidth=0.5,label="Trace")
@@ -2003,6 +2073,8 @@ class TracePlotFrame(tk.Frame):
         xlimits = [self.t0,self.tf]
         
         self.ax.set_xlim(xlimits)
+
+        # debug_print('TracePlotFrame h')
         
         #%%
         ## plot stuff
@@ -2026,7 +2098,8 @@ class TracePlotFrame(tk.Frame):
         # print(dir(self.ax))
         
         ### upper right info
-        if self.pref_plot_picks!='None':
+        if self.pref_plot_picks=="Real":
+            # print('creating pick labels')
             pick_textlabels = "\n".join([el.upper()+" arrival: "+str(np.round(pickt[ii],2))+" s" for ii,el in enumerate(pickn)])
             if len(pick_textlabels)>0: pick_textlabels = "\n"+pick_textlabels
         else: 
@@ -2054,13 +2127,16 @@ class TracePlotFrame(tk.Frame):
         
         self.update()
         self.canvas.draw()
+        self.fill_fields()
+        # print(sys.exc_info()[2])
         
-        print(plt.get_fignums())
+        # print(plt.get_fignums())
         # self.update()
         # self.print_figure_properties()
 
 def plugins_bind_events(frame):
     global plugins
+    debug_print('TracePlotFrame')
     
     for el in plugins:
         try:
@@ -2076,6 +2152,7 @@ global config_debug_mode
 global plugins
 global app_geometry
 global active_plugins
+global frame_tpf
 
 load_config()
 plugins = load_plugins(active_plugins)
