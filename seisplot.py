@@ -14,21 +14,10 @@ channel naming convention: https://ds.iris.edu/ds/nodes/dmc/data/formats/seed-ch
         https://docs.obspy.org/packages/autogen/obspy.core.stream.Stream.select.html
 
 TO DO:
-    add other filters
-    add error logging
-    make yaxis labels constant width
     add plot settings bar
-    filter out noisy spectrograms (seismograms?)
-    absolute vs relative time
-    save config info on exit
-    organize functions in the TracePlotFrame class
     
     DPI is now hard coded to fix a bug with the plot not sizing correctly on 
     start (temp fix). A better solution should be implemented.
-    
-    add except Exception as err: print(err) to plugin functions
-    after filtering station ids, trace nav frame is a little wonky
-
 """
 import tkinter as tk
 from tkinter import ttk, Grid
@@ -1182,6 +1171,7 @@ class TracePlotFrame(tk.Frame):
         self.reset_zoom()
         
         self.load_file()
+        self.fill_fields()
         self.filter_trace_list()
         
         self.file_listbox_label['text'] = str(n_current_file+1)+" of "+str(len(self.efs_files))+" files"
@@ -1530,6 +1520,7 @@ class TracePlotFrame(tk.Frame):
         tr = self.tr_pref
         d = tr.data
         Pxx, freqs = plt.psd(d,Fs=tr.stats.sampling_rate, figure=fig)
+        plt.show()
         return
     
     def plot_record_section(self):
