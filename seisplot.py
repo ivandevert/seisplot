@@ -166,7 +166,6 @@ def init_config_file():
     
     config.write(open('config.ini', 'w'))
     return
-    
 
 def load_config():
     """
@@ -528,7 +527,7 @@ class SeisPlot(tk.Tk):
                 show = False
         if show:
             frame = self.frames[cont]
-            if cont==TracePlotFrame: frame.refresh_st()
+            if cont==TracePlotFrame: frame.on_raise()
             frame.tkraise()
     
     def quit_program(self):
@@ -1081,6 +1080,9 @@ class TracePlotFrame(tk.Frame):
         # if n_current_file >= 0:
         #     self.on_file_change()
     
+    def on_raise(self):
+        self.refresh()
+        return
 #%% PLUGIN HANDLERS
     
     def plugins_grid(self):
@@ -1163,6 +1165,8 @@ class TracePlotFrame(tk.Frame):
         debug_print('TracePlotFrame')
         global n_current_file
         
+        self.new_file = True
+
         self.efs_files = self.controller.frames[StartPage].efs_files
         
         n_current_file = self.file_listbox.curselection()[0]
@@ -1195,9 +1199,9 @@ class TracePlotFrame(tk.Frame):
         self.st_subset = self.st.copy()
         self.st_pref = self.st_subset.copy()
         self.st_pref_subset = self.st_pref.copy()
-        self.tr_show_bool = np.ones(len(self.st), dtype=bool)
-        self.tr_ids_order = [el.get_id() for el in self.st.traces]
-        if len(self.tr_ids_order) != len(set(self.tr_ids_order)): raise ValueError("Not all EFS ids unique")
+        # self.tr_show_bool = np.ones(len(self.st), dtype=bool)
+        # self.tr_ids_order = [el.get_id() for el in self.st.traces]
+        # if len(self.tr_ids_order) != len(set(self.tr_ids_order)): raise ValueError("Not all EFS ids unique")
         
         
 #%% TRACE NAVIGATION FUNCTIONS
@@ -1209,6 +1213,11 @@ class TracePlotFrame(tk.Frame):
         """
         debug_print('TracePlotFrame')
         trace_ids = [str(el).split('|')[0].strip() for el in st.traces]
+
+        # change selection to the first one if the traces have changed
+        if len(trace_ids) != self.ntr:
+            self.n_current_trace = 0
+
         self.ntr = len(trace_ids)
         self.trace_listbox.delete(0,'end')
         
@@ -1217,7 +1226,7 @@ class TracePlotFrame(tk.Frame):
                 self.trace_listbox.insert('end',el)
         else:
             self.trace_listbox.insert('end','No traces available')
-        self.trace_listbox.select_set(0)
+        self.trace_listbox.select_set(self.n_current_trace)
         # self.trace_listbox.select_set(self.n_current_trace)
         
     def increment_trace(self):
@@ -1260,7 +1269,7 @@ class TracePlotFrame(tk.Frame):
         # print("SNR----------->: ", snr)
         
         self.filter_trace_list()
-                        
+        
         # refresh the trace listbox and stream, and set the current trace to 0
         # if snr option is set, skip populate_trace_listbox() (because it will be called later)
         if snr < 0.0001:
@@ -1288,7 +1297,7 @@ class TracePlotFrame(tk.Frame):
         # self.tr_show_bool
         
         # if nothing changed, return.
-        if id_str == self.pref_id_filter_str and distance1 == self.pref_dist1_filter and distance2 == self.pref_dist2_filter: 
+        if id_str == self.pref_id_filter_str and distance1 == self.pref_dist1_filter and distance2 == self.pref_dist2_filter and self.new_file==False: 
             # print('unchanged')
             return
         
@@ -1305,9 +1314,7 @@ class TracePlotFrame(tk.Frame):
                 for tr in self.st_subset:
                     deldist = tr.stats.station_data['deldist']
                     if deldist < distance1 or deldist > distance2:
-                        self.st_subset.remove(tr)
-            
-                        
+                        self.st_subset.remove(tr)                        
                     
             except Exception as err:
                 print("Invalid string entry. Please try again (click ? for help)")
@@ -1378,6 +1385,7 @@ class TracePlotFrame(tk.Frame):
         # if init, self. values don't exist yet, so cont is an intermediate control variable
         if init==True:
             cont = True
+        # check if settings have changed
         elif int(pref_filter_type != self.pref_filter_type) + int(f1_value != self.f1_value) + int(f2_value != self.f2_value) + int(f3_value != self.f3_value) + int(pref_filter_zerophase != self.pref_filter_zerophase) > 0:
             cont = True
         else:
@@ -1933,6 +1941,8 @@ class TracePlotFrame(tk.Frame):
         
         self.plugins_on_refresh_st_end()
         
+        self.new_file = False
+
         self.refresh()
     
     def refresh(self):
@@ -1954,10 +1964,10 @@ class TracePlotFrame(tk.Frame):
             return
         
         self.fig.clear()
-        debug_print('TracePlotFrame b1')
+        # debug_print('TracePlotFrame b1')
         # self.ax = self.fig.add_subplot(111)
         self.ax = self.fig.add_subplot(1, 1, 1)
-        debug_print('TracePlotFrame b2')
+        # debug_print('TracePlotFrame b2')
         
         # clear the previous figure/axes
         # self.ax.clear()
