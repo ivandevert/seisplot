@@ -173,10 +173,10 @@ def load_config():
     once per script execution.
 
     """
-    try: 
-        debug_print('main')
-    except:
-        print('DEBUG: main load_config (manual)')
+    # try: 
+    #     debug_print('main')
+    # except:
+    #     print('DEBUG: main load_config (manual)')
     
     global CONFIG_FILENAME
     global config_default_filepath
@@ -1027,7 +1027,7 @@ class TracePlotFrame(tk.Frame):
         self.f2_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
         self.f3_entry = ttk.Spinbox(pref_frame,width=3,from_=0.0,to=100.0)
         self.zerophase_checkbutton_value = tk.IntVar()
-        self.zerophase_checkbutton = ttk.Checkbutton(pref_frame, onvalue=1, offvalue=0, command=lambda _: self.on_zerophase_checkbutton_toggle(self.zerophase_checkbutton_value), text=' Zerophase')
+        self.zerophase_checkbutton = ttk.Checkbutton(pref_frame, onvalue=1, offvalue=0, command=lambda: self.on_zerophase_checkbutton_toggle(self.zerophase_checkbutton_value), text=' Zerophase')
         
         self.f1_entry.insert(0,str(self.pref_filter_f1))
         self.f2_entry.insert(0,str(self.pref_filter_f2))
@@ -1554,16 +1554,16 @@ class TracePlotFrame(tk.Frame):
         fn = plt.get_fignums()
         if self.fignum_spectrogram in fn: 
             self.plot_spectrogram()
-            print('spectrogram updated')
+            # print('spectrogram updated')
         if self.fignum_psd in fn: 
             self.plot_ppsd()
-            print('psd updated')
+            # print('psd updated')
         if self.fignum_response in fn: 
             popup_response(self)
-            print('response updated')
+            # print('response updated')
         if self.fignum_record_section in fn: 
             self.plot_record_section()
-            print('record section updated')
+            # print('record section updated')
         return
         
     def filter_help_popup(self):
@@ -1628,7 +1628,7 @@ class TracePlotFrame(tk.Frame):
         if self.manual_t_range:
             if event.inaxes is not None:
                 self.nclick += 1
-                print("THIS, nclick = ", self.nclick)
+                # print("THIS, nclick = ", self.nclick)
                 if self.nclick==1:
                     self.t1 = event.xdata
                     # self.nclick += 1
