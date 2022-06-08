@@ -155,7 +155,6 @@ def init_config_file():
     not exist in the same directory.
 
     """
-    debug_print('main')
     config = ConfigParser()
     config.add_section('settings')
     config.set('settings', 'config_default_filepath', '~/')
