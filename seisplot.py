@@ -166,7 +166,7 @@ def init_config_file():
     config.write(open('config.ini', 'w'))
     return
 
-def load_config():
+def load_config_handler():
     """
     Loads configuration settings from the configuration file. This is only used
     once per script execution.
@@ -186,16 +186,43 @@ def load_config():
     
     config = ConfigParser()
     
-    if not os.path.isfile(CONFIG_FILENAME): init_config_file()
-    config.read(CONFIG_FILENAME)
+    if not os.path.isfile(CONFIG_FILENAME): 
+        print("No config.ini file detected. Creating a new one.")
+        init_config_file()
+
+    try:
+        config.read(CONFIG_FILENAME)
+        load_config()
+    except:
+        print("Loading config.ini failed. Creating a new one and loading...", end='')
+        try:
+            init_config_file()
+            load_config()
+            print("Success")
+        except:
+            raise ValueError("Failed. You shouldn't see this error. Please contact me.")
+    # print('DEBUGGING: ', config_debug_mode)
+    return
+
+def load_config():
+
+    global CONFIG_FILENAME
+    global config_default_filepath
+    global config_p_wave_color
+    global config_s_wave_color
+    global config_debug_mode
+    global active_plugins
     
+    config = ConfigParser()
+
+    config.read(CONFIG_FILENAME)
+        
     config_default_filepath = config.get('settings', 'config_default_filepath').strip()
     config_p_wave_color = config.get('settings', 'config_p_wave_color').strip()
     config_s_wave_color = config.get('settings', 'config_s_wave_color').strip()
     config_debug_mode = str2bool(config.get('settings', 'config_debug_mode').strip())
     config_active_plugins = config.get('settings', 'config_active_plugins').split(',')
     active_plugins = [el.strip() for el in config_active_plugins]
-    # print('DEBUGGING: ', config_debug_mode)
     return
 
 def save_config(setting_name, setting_value):
@@ -2154,7 +2181,7 @@ global app_geometry
 global active_plugins
 global frame_tpf
 
-load_config()
+load_config_handler()
 plugins = load_plugins(active_plugins)
 
 app_geometry = np.add(DEF_GEOMETRY, [plugin_total_height, 0])
@@ -2177,7 +2204,6 @@ frame_tpf.trace_listbox.bind('<<ListboxSelect>>', lambda _: frame_tpf.on_trace_c
 # trace detrending
 frame_tpf.detrend1_entry.bind('<FocusOut>', lambda _: frame_tpf.on_detrend_option_change())
 frame_tpf.detrend2_entry.bind('<FocusOut>', lambda _: frame_tpf.on_detrend_option_change())
-
 
 # trace filtering
 frame_tpf.trace_filter_id_entry.bind('<FocusOut>', lambda _: frame_tpf.on_distance_or_id_filter_change())
