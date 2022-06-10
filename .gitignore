@@ -7,3 +7,4 @@ __pycache__/
 .github/
 config.ini
 .DS_Store
+plugins/plot_stations/tiles_cache/
