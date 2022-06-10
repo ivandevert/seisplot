@@ -133,7 +133,9 @@ def load_plugins(active_plugins):
                 except:
                     print("Error loading plugin " + el + ". Skipping.")
             else:
-                print("Plugin " + el + " not active.")
+                # don't print status if plugin is sample_plugin
+                if el not in ['sample_plugin']: 
+                    print("Plugin " + el + " not active.")
     return plugins
 
 def str2bool(string):
@@ -841,8 +843,8 @@ class TracePlotFrame(tk.Frame):
         self.plugin_colspan = 3
         
         #%% navigation frame
-        frame_label = tk.Label(navbar_frame, text="Trace plot",font=LARGE_FONT)
-        frame_label.pack(side='left')
+        # frame_label = tk.Label(navbar_frame, text="Trace plot",font=LARGE_FONT)
+        # frame_label.pack(side='left')
         back_button = ttk.Button(navbar_frame, text='Back',command=lambda: controller.show_frame(StartPage))
         back_button.pack(side='left')
         
