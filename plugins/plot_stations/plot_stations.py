@@ -34,11 +34,11 @@ script_path = os.path.dirname(os.path.realpath(__file__))
 cachedir = script_path + '/tiles_cache/'
 
 def on_grid(obj, frame):
-    obj.sample_button = ttk.Button(frame, text="Sample button",command= lambda:print_test('This is a test button and function'))
-    obj.sample_button.pack(side='left')
+    # obj.sample_button = ttk.Button(frame, text="Sample button",command= lambda:print_test('This is a test button and function'))
+    # obj.sample_button.pack(side='left')
     
     obj.sample_plot_button = ttk.Button(frame, text="Plot stations",command= lambda:on_plot_stations_button_press(obj))
-    obj.sample_plot_button.pack(side='right')
+    obj.sample_plot_button.pack(side='left')
     return
 
 def on_traceplotframe_init(obj):
