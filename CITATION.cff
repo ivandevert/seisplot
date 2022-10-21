@@ -13,3 +13,6 @@ authors:
     affiliation: Scripps Institution of Oceanography
     orcid: 'https://orcid.org/0000-0001-9560-4787'
     family-names: Vandevert
+repository-code: 'https://github.com/ivandevert/seisplot'
+abstract: Tool for plotting seismogram files
+date-released: '2022-06-10'
