@@ -1,10 +1,15 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
+title: Seisplot
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
 authors:
-  - family-names: Druskat
-    given-names: Stephan
-    orcid: https://orcid.org/0000-0003-4925-7248
-title: "My Research Software"
-version: 2.0.4
-doi: 10.5281/zenodo.1234
-date-released: 2021-08-11
+  - given-names: Ian
+    email: ivandevert@gmail.com
+    affiliation: Scripps Institution of Oceanography
+    orcid: 'https://orcid.org/0000-0001-9560-4787'
+    family-names: Vandevert
