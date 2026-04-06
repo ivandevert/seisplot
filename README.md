@@ -1,4 +1,4 @@
-# seisplot (open to name suggestions)
+# seisplot
  Tool for plotting seismogram files
 
 See the wiki for updated information
